@@ -158,3 +158,11 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+DynamoDBLocal_lib
+dynamodb-local-metadata.json
+shared-local-instance.db
+LICENSE.txt
+dynamodb_local_latest.tar.gz
+dynamo/README.txt
+dynamo/THIRD-PARTY-LICENSES.txt
