@@ -195,6 +195,7 @@
       "_comment": "Student 1: Retreive all available classes.",
       "endpoint": "/api/classes/available/",
       "method": "GET",
+      "input_headers": ["x-cwid", "x-first-name", "x-last-name"],
       "backend": [
         {
           "url_pattern": "/classes/available/",
@@ -217,7 +218,12 @@
           "roles": ["Student"],
           "jwk_local_path": "./etc/public_key.json",
           "disable_jwk_security": true,
-          "operation_debug": true
+          "operation_debug": true,
+          "propagate_claims": [
+            ["jti", "x-cwid"],
+            ["first_name", "x-first-name"],
+            ["last_name", "x-last-name"]
+          ]
         }
       }
     },

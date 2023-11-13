@@ -1,8 +1,11 @@
 from typing import Annotated
 import sqlite3
-from fastapi import Depends, HTTPException, Header, Body, status, APIRouter
+from fastapi import Depends, HTTPException, Header, Body, status, APIRouter, Request
 from .db_connection import get_db
 from .enrollment_helper import enroll_students_from_waitlist, is_auto_enroll_enabled
+from .get_user_decorator import get_personnel
+from .models import Personnel, Settings
+from .Dynamo import Dynamo
 
 WAITLIST_CAPACITY = 15
 MAX_NUMBER_OF_WAITLISTS_PER_STUDENT = 3
@@ -10,37 +13,42 @@ MAX_NUMBER_OF_WAITLISTS_PER_STUDENT = 3
 student_router = APIRouter()
 
 @student_router.get("/classes/available/")
-def get_available_classes(db: sqlite3.Connection = Depends(get_db)):
-    """
-    Retreive all available classes.
+@get_personnel(role="Student")
+def get_available_classes(request: Request, user: Personnel = None):
+    return {"user" : user.first_name}
+# def get_available_classes(db: sqlite3.Connection = Depends(get_db),  student_id: int = Header(
+#         alias="x-cwid", description="A unique ID for students, instructors, and registrars")):
+#     """
+#     Retreive all available classes.
 
-    Returns:
-    - dict: A dictionary containing the details of the classes
-    """
-    try:
-        classes = db.execute(
-            """
-            SELECT c.*
-            FROM "class" as c
-            WHERE datetime('now') BETWEEN c.enrollment_start AND c.enrollment_end 
-                AND (
-                        (c.room_capacity > 
-                            (SELECT COUNT(enrollment.student_id)
-                            FROM enrollment
-                            WHERE class_id=c.id) > 0) 
-                        OR ((SELECT COUNT(waitlist.student_id)
-                            FROM waitlist
-                            WHERE class_id=c.id) < ?)
-                    );
-            """, [WAITLIST_CAPACITY]
-        )
-    except sqlite3.Error as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
-    finally:
-        return {"classes": classes.fetchall()}
+#     Returns:
+#     - dict: A dictionary containing the details of the classes
+#     """
+#     print(student_id)
+#     try:
+#         classes = db.execute(
+#             """
+#             SELECT c.*
+#             FROM "class" as c
+#             WHERE datetime('now') BETWEEN c.enrollment_start AND c.enrollment_end 
+#                 AND (
+#                         (c.room_capacity > 
+#                             (SELECT COUNT(enrollment.student_id)
+#                             FROM enrollment
+#                             WHERE class_id=c.id) > 0) 
+#                         OR ((SELECT COUNT(waitlist.student_id)
+#                             FROM waitlist
+#                             WHERE class_id=c.id) < ?)
+#                     );
+#             """, [WAITLIST_CAPACITY]
+#         )
+#     except sqlite3.Error as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail={"type": type(e).__name__, "msg": str(e)},
+#         )
+#     finally:
+#         return {"classes": classes.fetchall()}
 
 @student_router.post("/enrollment/")
 def enroll(class_id: Annotated[int, Body(embed=True)],
