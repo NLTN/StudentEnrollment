@@ -1,11 +1,19 @@
 from typing import Optional
 from pydantic import BaseModel
-# from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings
 # import logging.config
 
-# class Settings():
-#     database = ""
-#     # logging_config: str
+class Settings(BaseSettings, env_file="enrollment_service/.env", extra="ignore"):
+    aws_access_key_id: str
+    aws_secret_access_key: str
+    aws_region_name: str
+    endpoint_url: str
+    
+class Personnel(BaseModel):
+    cwid: int
+    first_name: str
+    last_name: str
+    role: str
 
 class Instructor(BaseModel):
     id: int
