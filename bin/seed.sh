@@ -1,0 +1,1 @@
+python3 -m enrollment_service.seed
