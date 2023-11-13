@@ -3,11 +3,11 @@ from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 # import logging.config
 
-class Settings(BaseSettings, env_file="enrollment_service/.env", extra="ignore"):
+class Settings(BaseSettings, env_file=".env", extra="ignore"):
     aws_access_key_id: str
     aws_secret_access_key: str
     aws_region_name: str
-    endpoint_url: str
+    endpoint_url: str = "http://localhost:8000"
     
 class Personnel(BaseModel):
     cwid: int
