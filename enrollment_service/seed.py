@@ -99,6 +99,28 @@ create_enrollment_table_params = {
         {
             'AttributeName': 'course_section',
             'AttributeType': 'S'
+        },
+        {
+            "AttributeName" : "course_section_enrollment",
+            "AttributeType" : "S"
+        }
+    ],
+    "LocalSecondaryIndexes" : [
+        {
+            "IndexName" : "student_enrollment",
+            "KeySchema" : [
+                {
+                    "AttributeName" : "department",
+                    "KeyType" : "HASH"
+                },
+                {
+                    "AttributeName" : "course_section_enrollment",
+                    "KeyType" : 'RANGE'
+                }
+            ],
+            "Projection" : {
+                "ProjectionType" : "KEYS_ONLY"
+            }
         }
     ],
     "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3},
