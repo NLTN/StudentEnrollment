@@ -10,10 +10,18 @@ class Settings(BaseSettings, env_file=".env", extra="ignore"):
     endpoint_url: str = "http://localhost:8000"
     
 class Personnel(BaseModel):
-    cwid: int
+    cwid: str
     first_name: str
     last_name: str
-    role: str
+    roles: list[str]
+
+class EnrollmentPeriod(BaseModel):
+    semester: str
+    year: int
+    auto_enrollment_enabled: bool
+
+class PatchInstructor(BaseModel):
+    cwid: int
 
 class Instructor(BaseModel):
     id: int
@@ -27,7 +35,7 @@ class Student(BaseModel):
 
 class Course(BaseModel):
     department_code: str
-    course_no: int
+    course_no: str
     title: str
 
 class ClassPatch(BaseModel):
@@ -40,17 +48,17 @@ class ClassPatch(BaseModel):
     enrollment_end: Optional[str] = None
 
 class ClassCreate(BaseModel):
-    dept_code: str
-    course_num: int
-    section_no: int
-    academic_year: int
+    department_code: str
+    course_no: str
+    section_no: str
+    year: int
     semester: str
     instructor_id: int
-    room_num: int
+    # room_num: int
     room_capacity:int
-    course_start_date: str
-    enrollment_start: str
-    enrollment_end: str
+    # course_start_date: str
+    # enrollment_start: str
+    # enrollment_end: str
 
 class Enrollment(BaseModel):
     student_id: int

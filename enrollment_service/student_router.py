@@ -3,7 +3,7 @@ import sqlite3
 from fastapi import Depends, HTTPException, Header, Body, status, APIRouter, Request
 from .db_connection import get_db
 from .enrollment_helper import enroll_students_from_waitlist, is_auto_enroll_enabled
-from .get_user_decorator import get_personnel
+# from .get_user_decorator import get_personnel
 from .models import Personnel, Settings
 from .Dynamo import Dynamo
 
@@ -13,7 +13,7 @@ MAX_NUMBER_OF_WAITLISTS_PER_STUDENT = 3
 student_router = APIRouter()
 
 @student_router.get("/classes/available/")
-@get_personnel(role="Student")
+# @get_personnel(role="Student")
 def get_available_classes(request: Request, user: Personnel = None):
     return {"user" : user.first_name}
 # def get_available_classes(db: sqlite3.Connection = Depends(get_db),  student_id: int = Header(

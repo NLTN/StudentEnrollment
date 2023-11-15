@@ -2,6 +2,14 @@ import boto3
 from botocore.exceptions import ClientError
 from .models import Settings
 
+DYNAMO_TABLENAMES = {
+    'class' : "Class",
+    "course" : "Course",
+    "personnel" : "Personnel",
+    "enrollment" : "Enrollment",
+    "enrollment_period_status" : "Enrollment_Period_Status",
+    "waitlist_participation" : "Waitlist_Participation"
+}
 
 class Dynamo:
     def __init__ (self, config: Settings):
@@ -52,7 +60,7 @@ class Dynamo:
     def update_item(self, tablename: str, update_params: dict):
         try:
             result = self.dyn_resource.Table(tablename).update_item(**update_params)
-            return result
+            return result["Attributes"]
          
         except ClientError as err:
             raise err
@@ -79,8 +87,9 @@ class Dynamo:
     
     def transact_get_items(self, transact_items: list):
         try:
-            self.dyn_resource.meta.client.transact_get_items(TransactItems=transact_items)
-            return True
+            result = self.dyn_resource.meta.client.transact_get_items(TransactItems=transact_items)
+            return result["Responses"]
+        
         except ClientError as err:
             raise err
 
