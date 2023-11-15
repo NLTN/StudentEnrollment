@@ -1,16 +1,15 @@
 from typing import Annotated, Any
-import sqlite3
+# import sqlite3
 from http import HTTPStatus
 from fastapi import Depends, Response, HTTPException, Body, status, APIRouter, Request
 from fastapi.responses import JSONResponse
 from .db_connection import get_db
-from .enrollment_helper import enroll_students_from_waitlist, get_available_classes_within_first_2weeks
+# from .enrollment_helper import enroll_students_from_waitlist, get_available_classes_within_first_2weeks
 from .models import Course, ClassCreate, ClassPatch, EnrollmentPeriod, Personnel
 from .registrar_helper import *
 from .Dynamo import DYNAMO_TABLENAMES
-from .get_user_decorator import get_or_create_user, get_current_user, get_dynamo
+from .dependency_injection import get_or_create_user, get_current_user, get_dynamo
 from .models import EnrollmentPeriod
-from fastapi import Depends, Request
 
 registrar_router = APIRouter()
 
@@ -20,15 +19,17 @@ def set_auto_enrollment(term: EnrollmentPeriod, db: Any = Depends(get_dynamo)):
     Endpoint for enabling/disabling automatic enrollment.
 
     Parameters:
-    - enabled (bool): A boolean indicating whether automatic enrollment should be enabled or disabled.
+    - semester (str): term's semester
+    - year (int) : term's year 
+    - auto_enrollment_enabled (bool): A boolean indicating whether automatic enrollment should be enabled or disabled.
 
     Raises:
-    - HTTPException (409): If there is an integrity error while updating the database.
+    - HTTPException (404): If the enrollment period is not found.
 
     Returns:
         dict: A dictionary containing a detail message confirming the status of auto enrollment.
     """
-    # dynamo = request.app.state.dynamo
+
     dynamo = db
     query_params = generate_get_enrollment_period_params(term)
     get_enrollment_period_status = dynamo.query(DYNAMO_TABLENAMES["enrollment_period_status"], query_params)
@@ -72,7 +73,7 @@ def create_course(course: Course, db: Any = Depends(get_dynamo)):
     Parameters:
     - `course` (CourseInput): JSON body input for the course with the following fields:
         - `department_code` (str): The department code for the course.
-        - `course_no` (int): The course number.
+        - `course_no` (str): The course number.
         - `title` (str): The title of the course.
 
     Returns:
@@ -114,35 +115,23 @@ def create_class(new_class: ClassCreate, db: Any = Depends(get_dynamo)):
     Creates a new class.
 
     Parameters:
-    - `class` (Class): The JSON object representing the class with the following properties:
-        - `dept_code` (str): Department code.
-        - `course_num` (int): Course number.
+    - `class` (ClassCreate): The JSON object representing the class with the following properties:
+        - `department_code` (str): Department code.
+        - `course_no` (int): Course number.
         - `section_no` (int): Section number.
-        - `academic_year` (int): Academic year.
+        - `year` (int): Academic year.
         - `semester` (str): Semester name (SP, SU, FA, WI).
         - `instructor_id` (int): Instructor ID.
-        - `room_num` (int): Room number.
         - `room_capacity` (int): Room capacity.
-        - `course_start_date` (str): Course start date (format: "YYYY-MM-DD").
-        - `enrollment_start` (str): Enrollment start date (format: "YYYY-MM-DD HH:MM:SS.SSS").
-        - `enrollment_end` (str): Enrollment end date (format: "YYYY-MM-DD HH:MM:SS.SSS").
+       
 
     Returns:
     - dict: A dictionary containing the details of the created item.
-
+    
     Raises:
     - HTTPException (409): If a conflict occurs (e.g., duplicate course).
+    - HTTPException (400): If course information or instructor information is not found
     """
-    # check if course exist
-    # course = Course(**{
-    #     "department_code" : new_class.department_code,
-    #     "course_no": new_class.course_no,
-    #     "title" : ""
-    # })
-    # get_course_params = generate_get_course_params(course, **{"TableName": DYNAMO_TABLENAMES["course"]})
-    # get_class_params = generate_get_class_params(new_class, **{"TableName": DYNAMO_TABLENAMES["class"]})
-
-    # transact_items = [{"Get": get_course_params}, {"Get": get_class_params}]
     get_course_params = {
         "Get" : {
             "TableName" : DYNAMO_TABLENAMES["course"],
@@ -167,11 +156,12 @@ def create_class(new_class: ClassCreate, db: Any = Depends(get_dynamo)):
         "Get" : {
             "TableName" : DYNAMO_TABLENAMES["personnel"],
             "Key" : {
-                "cwid" : str(new_class.instructor_id)
+                "cwid" : new_class.instructor_id
             }
         }
     }
 
+    # minimizing disk hits for better performance
     query_results = db.transact_get_items(transact_items=[get_course_params, get_class_params, get_instructor_params])
     
     if not query_results[0]:
@@ -180,7 +170,7 @@ def create_class(new_class: ClassCreate, db: Any = Depends(get_dynamo)):
     if query_results[1]:
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="This class already exists")
     
-    if not query_results[2]:
+    if not query_results[2] or not "Instructor" in query_results[2]["Item"]["roles"]:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Instructor not found")
     
     slugs = {
@@ -192,11 +182,7 @@ def create_class(new_class: ClassCreate, db: Any = Depends(get_dynamo)):
     item.update(slugs)
     
     if db.put_item(tablename=DYNAMO_TABLENAMES["class"], item=item):
-        return JSONResponse(status_code=HTTPStatus.CREATED, content={"message": "Created class successfully"})
-
-
-    # if 
-    # check if class exist
+        return JSONResponse(status_code=HTTPStatus.CREATED, content={"message": "Created class successfully", "data" : item})
 
 
     # record = dict(body_data)
@@ -225,19 +211,20 @@ def delete_class(class_term_slug : str, db: Any = Depends(get_dynamo)):
     Deletes a specific class.
 
     Parameters:
-    - `id` (int): The ID of the class to delete.
+    - `class_term_slug` (str): concatenated string of class term.
+    i.e class_term_slug = Fall-2023_CPSC-449
 
     Returns:
     - dict: A dictionary indicating the success of the deletion operation.
       Example: {"message": "Item deleted successfully"}
 
     Raises:
-    - HTTPException (404): If the class with the specified ID is not found.
-    - HTTPException (409): If there is a conflict in the delete operation.
+    - HTTPException (400): If invalid class_term_slug was passed.
+    - HTTPException (404): If the class with class_term_slug is not found.
     """
     args = class_term_slug.split("_")
     if len(args) != 2:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="invalid class term")
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="invalid class term. class term must be in the format of $term_$class")
     
     term, _class = args
     
@@ -276,27 +263,20 @@ def delete_class(class_term_slug : str, db: Any = Depends(get_dynamo)):
     # return {"detail": "Item deleted successfully"}
 
 @registrar_router.patch("/classes/{class_term_slug}", dependencies=[Depends(get_or_create_user)])
-def update_class(instructor: PatchInstructor, class_term_slug : str, db: Any = Depends(get_dynamo)):
+def update_class_instructor(instructor: PatchInstructor, class_term_slug : str, db: Any = Depends(get_dynamo)):
     """
-    Updates specific details of a class.
+    Updates instructor information for a class.
 
     Parameters:
-    - `class` (ClassPatch): The JSON object representing the class with the following properties:
-        - `section_no` (int, optional): Section number.
-        - `instructor_id` (int, optional): Instructor ID.
-        - `room_num` (int, optional): Room number.
-        - `room_capacity` (int, optional): Room capacity.
-        - `course_start_date` (str, optional): Course start date (format: "YYYY-MM-DD").
-        - `enrollment_start` (str, optional): Enrollment start date (format: "YYYY-MM-DD HH:MM:SS.SSS").
-        - `enrollment_end` (str, optional): Enrollment end date (format: "YYYY-MM-DD HH:MM:SS.SSS").
+    - `instructor` (PatchInstructor): The JSON object representing the class with the following properties:
+        - `cwid` (int): Instructor ID.
 
     Returns:
     - dict: A dictionary indicating the success of the update operation.
       Example: {"message": "Item updated successfully"}
 
     Raises:
-    - HTTPException (404): If the class with the specified ID is not found.
-    - HTTPException (409): If there is a conflict in the update operation (e.g., duplicate class details).
+    - HTTPException (404): If the class with the specified ID, or instructor is not found.
     """
     args = class_term_slug.split("_")
 
@@ -319,7 +299,7 @@ def update_class(instructor: PatchInstructor, class_term_slug : str, db: Any = D
         "Get": {
             "TableName" : DYNAMO_TABLENAMES["personnel"],
             "Key" : {
-                "cwid" : str(instructor.cwid)
+                "cwid" : instructor.cwid
             }
         }
     }
@@ -330,7 +310,7 @@ def update_class(instructor: PatchInstructor, class_term_slug : str, db: Any = D
     if not query_results[0]:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="class information not found")
     
-    if not query_results[1]:
+    if not query_results[1] or not "Instructor" in query_results[1]["Item"]["roles"]:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="instructor information not found")
     
     update_instructor_params = {

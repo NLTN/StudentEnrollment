@@ -56,7 +56,8 @@
           ],
           "extra_config": {
             "backend/http": {
-              "return_error_code": true
+              "return_error_code": true,
+              "return_error_details": "enrollment_service"
             }
           }
         }
@@ -93,7 +94,8 @@
           ],
           "extra_config": {
             "backend/http": {
-              "return_error_code": true
+              "return_error_code": true,
+              "return_error_details": "enrollment_service"
             }
           }
         }
@@ -130,7 +132,8 @@
           ],
           "extra_config": {
             "backend/http": {
-              "return_error_code": true
+              "return_error_code": true,
+              "return_error_details": "enrollment_service"
             }
           }
         }
@@ -167,7 +170,8 @@
           ],
           "extra_config": {
             "backend/http": {
-              "return_error_code": true
+              "return_error_code": true,
+              "return_error_details": "enrollment_service"
             }
           }
         }
@@ -204,7 +208,8 @@
           ],
           "extra_config": {
             "backend/http": {
-              "return_error_code": true
+              "return_error_code": true,
+              "return_error_details": "enrollment_service"
             }
           }
         }
@@ -230,7 +235,7 @@
       "_comment": "Student 1: Retreive all available classes.",
       "endpoint": "/api/classes/available/",
       "method": "GET",
-      "input_headers": ["x-cwid", "x-first-name", "x-last-name"],
+      "input_headers": ["x-cwid", "x-first-name", "x-last-name", "x-roles"],
       "backend": [
         {
           "url_pattern": "/classes/available/",
@@ -257,7 +262,8 @@
           "propagate_claims": [
             ["jti", "x-cwid"],
             ["first_name", "x-first-name"],
-            ["last_name", "x-last-name"]
+            ["last_name", "x-last-name"],
+            ["roles", "x-roles"]
           ]
         }
       }

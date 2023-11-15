@@ -159,7 +159,7 @@ create_waitlist_participation_table_params = {
         },
         {
             'AttributeName': 'cwid',
-            'AttributeType': 'S'
+            'AttributeType': 'N'
         }
     ],
     "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3},

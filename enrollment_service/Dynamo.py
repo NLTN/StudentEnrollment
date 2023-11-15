@@ -75,6 +75,7 @@ class Dynamo:
     def delete_item(self, tablename: str, delete_params: dict):
         try:
             self.dyn_resource.Table(tablename).delete_item(**delete_params)
+            return True
         except ClientError as err:
             raise err
     
