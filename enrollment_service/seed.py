@@ -8,22 +8,44 @@ create_class_table_params = {
     "TableName":'Class',
     "KeySchema":[
         {
-            'AttributeName': 'department',
+            'AttributeName': 'term',
             'KeyType': 'HASH'
         },
         {
-            'AttributeName': 'course_section',
+            'AttributeName': 'class',
             'KeyType': 'RANGE'
         }
     ],
     "AttributeDefinitions":[
         {
+            'AttributeName': 'term',
+            'AttributeType': 'S'
+        },
+        {
             'AttributeName': 'department',
             'AttributeType': 'S'
         },
         {
-            'AttributeName': 'course_section',
+            'AttributeName': 'class',
             'AttributeType': 'S'
+        }
+    ],
+    "LocalSecondaryIndexes" : [
+        {
+            "IndexName" : "department_classes",
+            "KeySchema" : [
+                {
+                    "AttributeName" : "term",
+                    "KeyType" : "HASH"
+                },
+                {
+                    "AttributeName" : "department",
+                    "KeyType" : 'RANGE'
+                }
+            ],
+            "Projection" : {
+                "ProjectionType" : "KEYS_ONLY"
+            }
         }
     ],
     "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3},
@@ -33,48 +55,32 @@ create_personnel_table_params = {
     "TableName":'Personnel',
     "KeySchema":[
         {
-            'AttributeName': 'role',
-            'KeyType': 'HASH'
-        },
-        {
             'AttributeName': 'cwid',
-            'KeyType': 'RANGE'
+            'KeyType': 'HASH'
         }
     ],
     "AttributeDefinitions":[
         {
-            'AttributeName': 'role',
-            'AttributeType': 'S'
-        },
-        {
             'AttributeName': 'cwid',
-            'AttributeType': 'S'
+            'AttributeType': 'N'
         }
     ],
     "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3},
 }
 
-create_enrollment_period_status_table_params = {
-    "TableName":'Enrollment_Period_Status',
+create_config_table_params = {
+    "TableName":'Config',
     "KeySchema":[
         {
-            'AttributeName': 'year',
+            'AttributeName': 'variable_name',
             'KeyType': 'HASH'
-        },
-        {
-            'AttributeName': 'semester',
-            'KeyType': 'RANGE'
         }
     ],
     "AttributeDefinitions":[
         {
-            'AttributeName': 'year',
-            'AttributeType': 'N'
-        },
-        {
-            'AttributeName': 'semester',
+            'AttributeName': 'variable_name',
             'AttributeType': 'S'
-        }
+        }        
     ],
     "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3},
 }
@@ -83,25 +89,25 @@ create_enrollment_table_params = {
     "TableName":'Enrollment',
     "KeySchema":[
         {
-            'AttributeName': 'department',
+            'AttributeName': 'term',
             'KeyType': 'HASH'
         },
         {
-            'AttributeName': 'course_section',
+            'AttributeName': 'class',
             'KeyType': 'RANGE'
         }
     ],
     "AttributeDefinitions":[
         {
-            'AttributeName': 'department',
+            'AttributeName': 'term',
             'AttributeType': 'S'
         },
         {
-            'AttributeName': 'course_section',
+            'AttributeName': 'class',
             'AttributeType': 'S'
         },
         {
-            "AttributeName" : "course_section_enrollment",
+            "AttributeName" : "student_cwid",
             "AttributeType" : "S"
         }
     ],
@@ -110,11 +116,11 @@ create_enrollment_table_params = {
             "IndexName" : "student_enrollment",
             "KeySchema" : [
                 {
-                    "AttributeName" : "department",
+                    "AttributeName" : "term",
                     "KeyType" : "HASH"
                 },
                 {
-                    "AttributeName" : "course_section_enrollment",
+                    "AttributeName" : "student_cwid",
                     "KeyType" : 'RANGE'
                 }
             ],
@@ -130,34 +136,60 @@ create_waitlist_participation_table_params = {
     "TableName":'Waitlist_Participation',
     "KeySchema":[
         {
-            'AttributeName': 'year',
+            'AttributeName': 'term',
             'KeyType': 'HASH'
         },
         {
-            'AttributeName': 'semester',
+            'AttributeName': 'cwid',
             'KeyType': 'RANGE'
         }
     ],
     "AttributeDefinitions":[
         {
-            'AttributeName': 'year',
-            'AttributeType': 'N'
+            'AttributeName': 'term',
+            'AttributeType': 'S'
         },
         {
-            'AttributeName': 'semester',
+            'AttributeName': 'cwid',
+            'AttributeType': 'N'
+        }
+    ],
+    "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3},
+}
+
+create_course_table_params = {
+    "TableName":'Course',
+    "KeySchema":[
+        {
+            'AttributeName': 'department_code',
+            'KeyType': 'HASH'
+        },
+        {
+            'AttributeName': 'course_no',
+            'KeyType': 'RANGE'
+        }
+    ],
+    "AttributeDefinitions":[
+        {
+            'AttributeName': 'department_code',
+            'AttributeType': 'S'
+        },
+        {
+            'AttributeName': 'course_no',
             'AttributeType': 'S'
         }
     ],
     "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3},
 }
 
-required_tables = ["Class", "Personnel", "Enrollment_Period_Status", "Enrollment", "Waitlist_Participation"]
+required_tables = ["Class", "Course", "Personnel", "Config", "Enrollment", "Waitlist_Participation"]
 existing_tables = [table.name for table in dynamo.list_tables()]
 
 params= {
     "Class" : create_class_table_params,
+    "Course" : create_course_table_params,
     "Personnel" : create_personnel_table_params,
-    "Enrollment_Period_Status" : create_enrollment_period_status_table_params,
+    "Config" : create_config_table_params,
     "Enrollment" : create_enrollment_table_params,
     "Waitlist_Participation" : create_waitlist_participation_table_params,
 }
@@ -168,7 +200,14 @@ for table in required_tables:
         print(f'existing table {table} found, recreating table')
         dynamo.delete_table(table)
     dynamo.create_table(create_params=params[table])
-    
+
+# seeding auto_enrollment_enabled config
+item = {
+    "variable_name" : "auto_enrollment_enabled",
+    "value" : True
+}
+
+dynamo.put_item(tablename="Config", item=item)
 
 
 
