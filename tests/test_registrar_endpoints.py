@@ -3,6 +3,8 @@ import unittest
 import requests
 from tests.helpers import *
 from tests.settings import BASE_URL, USER_DB_PATH, ENROLLMENT_DB_PATH
+from tests.dynamodb import DynamoDB
+from boto3.dynamodb.conditions import Key
 
 class AutoEnrollmentTest(unittest.TestCase):
     def setUp(self):
@@ -23,7 +25,9 @@ class AutoEnrollmentTest(unittest.TestCase):
             "Authorization": f"Bearer {access_token}"
         }
         body = {
-            "enabled": True
+            "year": 2024,
+            "semester": "Fall",
+            "auto_enrollment_enabled": True
         }
 
         # Send request
@@ -78,7 +82,7 @@ class CreateCourseTest(unittest.TestCase):
         }
         body = {
             "department_code": "CPSC",
-            "course_no": 999,
+            "course_no": "888",
             "title": "TEST TEST"
         }
 
@@ -103,7 +107,7 @@ class CreateCourseTest(unittest.TestCase):
         }
         body = {
             "department_code": "CPSC",
-            "course_no": 999,
+            "course_no": "888",
             "title": "TEST TEST"
         }
 
@@ -125,44 +129,48 @@ class CreateClassTest(unittest.TestCase):
 
     def test_create_class(self):
         # Register & Login
-        user_register(2, "abc@csu.fullerton.edu", "1234", "nathan",
+        user_register(101, "abc@csu.fullerton.edu", "1234", "nathan",
                       "nguyen", ["Student", "Registrar"])
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
         # Send request
-        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10,
-                                "2023-06-12", "2023-06-01 09:00:00", "2024-06-15 17:00:00", access_token)
+        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, access_token)
 
         # Assert
         self.assertEqual(response.status_code, 200)
 
     def test_create_duplicate_class(self):
         # Register & Login
-        user_register(2, "abc@csu.fullerton.edu", "1234", "nathan",
+        user_register(101, "abc@csu.fullerton.edu", "1234", "nathan",
                       "nguyen", ["Student", "Registrar"])
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
         # Send request
-        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10,
-                                "2023-06-12", "2023-06-01 09:00:00", "2024-06-15 17:00:00", access_token)
+        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, access_token)
 
-        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10,
-                                "2023-06-12", "2023-06-01 09:00:00", "2024-06-15 17:00:00", access_token)
+        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, access_token)
 
         # Assert
         self.assertEqual(response.status_code, 409)
 
     def test_update_class(self):
         # Register & Login
-        user_register(2, "abc@csu.fullerton.edu", "1234", "nathan",
+        user_register(101, "abc@csu.fullerton.edu", "1234", "nathan",
                       "nguyen", ["Student", "Registrar"])
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
-        # Create a class
-        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10,
-                                "2023-06-12", "2023-06-01 09:00:00", "2024-06-15 17:00:00", access_token)
+        # Setup
+        old_instructor_id = 1
+        new_instructor_id = 2
 
-        inserted_id = response.json()["inserted_id"]
+        # Create a class
+        response = create_class("SOC", "301", "1", 2024, "FA", old_instructor_id, 10, access_token)
+
+        inserted_data = response.json()["data"]
+        partition_key_value = inserted_data["term"]
+        sort_key_value = inserted_data["class"]
+
+        class_term_slug = f"{partition_key_value}_{sort_key_value}"
 
         # Prepare header & message body        
         headers = {
@@ -170,14 +178,25 @@ class CreateClassTest(unittest.TestCase):
             "Authorization": f"Bearer {access_token}"
         }
         body = {
-            "instructor_id": 2
+            "cwid": new_instructor_id
         }
 
         # Send request
-        url = f'{BASE_URL}/api/classes/{inserted_id}'
+        url = f'{BASE_URL}/api/classes/{class_term_slug}'
         response = requests.patch(url, headers=headers, json=body)
 
+
+        # Direct Access DB to check if data has been updated successfully
+        query_params = {
+            "KeyConditionExpression": Key("term").eq(partition_key_value) 
+                                    & Key("class").eq(sort_key_value)
+        }
+        db = DynamoDB()
+        items = db.query("Class", query_params)
+
         # Assert
+        self.assertGreater(len(items), 0)
+        self.assertEqual(items[0]["instructor_id"], new_instructor_id)
         self.assertEqual(response.status_code, 200)
 
     def test_delete_class(self):
@@ -186,11 +205,14 @@ class CreateClassTest(unittest.TestCase):
                       "nguyen", ["Student", "Registrar"])
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
-        # Send request
-        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10,
-                                "2023-06-12", "2023-06-01 09:00:00", "2024-06-15 17:00:00", access_token)
-        
-        inserted_id = response.json()["inserted_id"]
+        # Create a class
+        response = create_class("SOC", "301", "1", 2024, "FA", 1, 10, access_token)
+
+        inserted_data = response.json()["data"]
+        partition_key_value = inserted_data["term"]
+        sort_key_value = inserted_data["class"]
+
+        class_term_slug = f"{partition_key_value}_{sort_key_value}"
 
         # Prepare header & message body        
         headers = {
@@ -199,19 +221,28 @@ class CreateClassTest(unittest.TestCase):
         }
 
         # Send request
-        url = f'{BASE_URL}/api/classes/{inserted_id}'
+        url = f'{BASE_URL}/api/classes/{class_term_slug}'
         response = requests.delete(url, headers=headers)
         
+        # Direct Access DB to check if data has been updated successfully
+        query_params = {
+            "KeyConditionExpression": Key("term").eq(partition_key_value) 
+                                    & Key("class").eq(sort_key_value)
+        }
+        db = DynamoDB()
+        items = db.query("Class", query_params)
+
         # Assert
+        self.assertEqual(len(items), 0)
         self.assertEqual(response.status_code, 200)
 
-    def test_delete_noexisting_class(self):
+    def test_delete_nonexisting_class(self):
         # Register & Login
         user_register(2, "abc@csu.fullerton.edu", "1234", "nathan",
                       "nguyen", ["Student", "Registrar"])
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
-        inserted_id = 99999999
+        inserted_id = "9999_ABC-12"
 
         # Prepare header & message body        
         headers = {
@@ -225,6 +256,27 @@ class CreateClassTest(unittest.TestCase):
         
         # Assert
         self.assertEqual(response.status_code, 404)
+        
+    def test_delete_class_invalid_id(self):
+        # Register & Login
+        user_register(2, "abc@csu.fullerton.edu", "1234", "nathan",
+                      "nguyen", ["Student", "Registrar"])
+        access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
+        inserted_id = 999
+
+        # Prepare header & message body        
+        headers = {
+            "Content-Type": "application/json;",
+            "Authorization": f"Bearer {access_token}"
+        }
+
+        # Send request
+        url = f'{BASE_URL}/api/classes/{inserted_id}'
+        response = requests.delete(url, headers=headers)
+        
+        # Assert
+        self.assertEqual(response.status_code, 400)
+        
 if __name__ == '__main__':
     unittest.main()
