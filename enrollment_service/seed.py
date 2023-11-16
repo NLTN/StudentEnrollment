@@ -200,7 +200,14 @@ for table in required_tables:
         print(f'existing table {table} found, recreating table')
         dynamo.delete_table(table)
     dynamo.create_table(create_params=params[table])
-    
+
+# seeding auto_enrollment_enabled config
+item = {
+    "variable_name" : "auto_enrollment_enabled",
+    "value" : True
+}
+
+dynamo.put_item(tablename="Config", item=item)
 
 
 

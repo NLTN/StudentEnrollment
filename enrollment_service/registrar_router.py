@@ -29,9 +29,8 @@ def set_auto_enrollment(config: Config, db: Any = Depends(get_dynamo)):
         dict: A dictionary containing a detail message confirming the status of auto enrollment.
     """
 
-    dynamo = db
     query_params = generate_get_enrollment_period_params()
-    get_enrollment_period_status = dynamo.query(DYNAMO_TABLENAMES["config"], query_params)
+    get_enrollment_period_status = db.query(DYNAMO_TABLENAMES["config"], query_params)
 
     if not get_enrollment_period_status:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"detail" : "config not found"})
@@ -43,7 +42,7 @@ def set_auto_enrollment(config: Config, db: Any = Depends(get_dynamo)):
         return JSONResponse(status_code=HTTPStatus.OK, content={"message" : enrollment_period_status})
 
     update_params = generate_update_enrollment_period_params(config.auto_enrollment_enabled)
-    result = dynamo.update_item(DYNAMO_TABLENAMES["config"] ,update_params)
+    result = db.update_item(DYNAMO_TABLENAMES["config"] ,update_params)
 
     return JSONResponse(status_code=HTTPStatus.OK, content={"message" : f'updated enrollment period successfully', "detail": result})
 
