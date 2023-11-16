@@ -1,46 +1,71 @@
-from typing import Annotated
+from typing import Annotated, Any
 import sqlite3
-from fastapi import Depends, HTTPException, Header, Body, status, APIRouter
+from fastapi import Depends, HTTPException, Header, Body, status, APIRouter, Request
 from .db_connection import get_db
 from .enrollment_helper import enroll_students_from_waitlist, is_auto_enroll_enabled
+from .dependency_injection import *
+from .models import Personnel, Settings
+from .Dynamo import Dynamo
 
 WAITLIST_CAPACITY = 15
 MAX_NUMBER_OF_WAITLISTS_PER_STUDENT = 3
 
 student_router = APIRouter()
 
-@student_router.get("/classes/available/")
-def get_available_classes(db: sqlite3.Connection = Depends(get_db)):
-    """
-    Retreive all available classes.
+@student_router.get("/classes/available/", dependencies=[Depends(get_or_create_user)])
+def get_available_classes(db: Any = Depends(get_dynamo), user: Personnel = Depends(get_current_user)):
+    '''
+    EXAMPLE ONLY (please reimplement this endpoint)
+    requirements:
+        - "x-cwid", "x-first-name", "x-last-name", "x-roles" headers from krakend must be propagated
 
-    Returns:
-    - dict: A dictionary containing the details of the classes
-    """
-    try:
-        classes = db.execute(
-            """
-            SELECT c.*
-            FROM "class" as c
-            WHERE datetime('now') BETWEEN c.enrollment_start AND c.enrollment_end 
-                AND (
-                        (c.room_capacity > 
-                            (SELECT COUNT(enrollment.student_id)
-                            FROM enrollment
-                            WHERE class_id=c.id) > 0) 
-                        OR ((SELECT COUNT(waitlist.student_id)
-                            FROM waitlist
-                            WHERE class_id=c.id) < ?)
-                    );
-            """, [WAITLIST_CAPACITY]
-        )
-    except sqlite3.Error as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
-    finally:
-        return {"classes": classes.fetchall()}
+    example of dependency injection usage:
+        1: "dependencies = [get_or_create_user]" -> this function retrieves or create user information based on 
+            the propagated headers. (syncs with user db). user info is stored in request state
+        2: get_dynamo -> abstraction to make dynamo accesible within the endpoint. the dynamo wrapper instance was 
+            instantiated in app.py and already stored in the app state. this function just returns the object
+
+            **why are we reusing the same instance of dynamo wrapper?
+              - botocore has a built in db connection pool, of default 10 connections. that's why we only
+                need one instance for the dynamo wrapper
+
+        3: get_current_user -> abstraction to make current user accessible within the endpoint. this function just returns
+            the user object saved in request state from get_or_create_user 
+    '''
+    return {"user" : user.cwid}
+# def get_available_classes(db: sqlite3.Connection = Depends(get_db),  student_id: int = Header(
+#         alias="x-cwid", description="A unique ID for students, instructors, and registrars")):
+#     """
+#     Retreive all available classes.
+
+#     Returns:
+#     - dict: A dictionary containing the details of the classes
+#     """
+#     print(student_id)
+#     try:
+#         classes = db.execute(
+#             """
+#             SELECT c.*
+#             FROM "class" as c
+#             WHERE datetime('now') BETWEEN c.enrollment_start AND c.enrollment_end 
+#                 AND (
+#                         (c.room_capacity > 
+#                             (SELECT COUNT(enrollment.student_id)
+#                             FROM enrollment
+#                             WHERE class_id=c.id) > 0) 
+#                         OR ((SELECT COUNT(waitlist.student_id)
+#                             FROM waitlist
+#                             WHERE class_id=c.id) < ?)
+#                     );
+#             """, [WAITLIST_CAPACITY]
+#         )
+#     except sqlite3.Error as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail={"type": type(e).__name__, "msg": str(e)},
+#         )
+#     finally:
+#         return {"classes": classes.fetchall()}
 
 @student_router.post("/enrollment/")
 def enroll(class_id: Annotated[int, Body(embed=True)],

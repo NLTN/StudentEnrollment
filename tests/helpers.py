@@ -16,9 +16,9 @@ def unittest_setUp():
         os.system(f"[ ! -f {USER_DB_PATH} ] || cp {USER_DB_PATH} {USER_DB_PATH}.backup")
         os.system("sh ./bin/create-user-db.sh > /dev/null")
 
-    # Backup Enrollment service database
-    os.system(f"[ ! -f {ENROLLMENT_DB_PATH} ] || mv {ENROLLMENT_DB_PATH} {ENROLLMENT_DB_PATH}.backup")
-    os.system("sh ./bin/create-enrollment-db.sh > /dev/null")
+    # Reset Enrollment service database
+    os.system("sh ./bin/seed.sh > /dev/null")
+    os.system("python3 tests/sample_data.py")
 
 def unittest_tearDown():
     if USING_LITEFS_TO_REPLICATE_USER_DATABASE:
@@ -29,9 +29,8 @@ def unittest_tearDown():
         os.system(f"rm -f {USER_DB_PATH}")
         os.system(f"[ ! -f {USER_DB_PATH}.backup ] || mv {USER_DB_PATH}.backup {USER_DB_PATH}")
 
-    # Restore Enrollment service database
-    os.system(f"rm -f {ENROLLMENT_DB_PATH}")
-    os.system(f"[ ! -f {ENROLLMENT_DB_PATH}.backup ] || mv {ENROLLMENT_DB_PATH}.backup {ENROLLMENT_DB_PATH}")
+    # Reset Enrollment service database
+    os.system("sh ./bin/seed.sh > /dev/null")
 
 def user_register(user_id, username, password, first_name, last_name, roles: list[str]):
     url = f'{BASE_URL}/api/register'
@@ -60,26 +59,21 @@ def user_login(username, password):
     
     return None
 
-def create_class(dept_code, course_num, section_no, academic_year, semester,
-                instructor_id, room_capacity, 
-                course_start_date, enrollment_start, enrollment_end, access_token):
+def create_class(dept_code, course_no, section_no, academic_year, semester,
+                instructor_id, room_capacity, access_token):
     # Prepare header & message body        
     headers = {
         "Content-Type": "application/json;",
         "Authorization": f"Bearer {access_token}"
     }
     body = {
-        "dept_code": dept_code,
-        "course_num": course_num,
+        "department_code": dept_code,
+        "course_no": course_no,
         "section_no": section_no,
-        "academic_year": academic_year,
+        "year": academic_year,
         "semester": semester,
         "instructor_id": instructor_id,
-        "room_num": 205,
-        "room_capacity": room_capacity,
-        "course_start_date": course_start_date,
-        "enrollment_start": enrollment_start,
-        "enrollment_end": enrollment_end
+        "room_capacity": room_capacity
     }
 
     # Send request
