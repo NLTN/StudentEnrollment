@@ -56,8 +56,7 @@
           ],
           "extra_config": {
             "backend/http": {
-              "return_error_code": true,
-              "return_error_details": "enrollment_service"
+              "return_error_code": true
             }
           }
         }
@@ -94,8 +93,7 @@
           ],
           "extra_config": {
             "backend/http": {
-              "return_error_code": true,
-              "return_error_details": "enrollment_service"
+              "return_error_code": true
             }
           }
         }
@@ -132,8 +130,7 @@
           ],
           "extra_config": {
             "backend/http": {
-              "return_error_code": true,
-              "return_error_details": "enrollment_service"
+              "return_error_code": true
             }
           }
         }
@@ -170,8 +167,7 @@
           ],
           "extra_config": {
             "backend/http": {
-              "return_error_code": true,
-              "return_error_details": "enrollment_service"
+              "return_error_code": true
             }
           }
         }
@@ -208,8 +204,7 @@
           ],
           "extra_config": {
             "backend/http": {
-              "return_error_code": true,
-              "return_error_details": "enrollment_service"
+              "return_error_code": true
             }
           }
         }
