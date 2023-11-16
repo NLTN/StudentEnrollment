@@ -1,24 +1,23 @@
 from boto3.dynamodb.conditions import Key, Attr
 from .models import *
 
-def generate_get_enrollment_period_params(request: EnrollmentPeriod):
+def generate_get_enrollment_period_params():
     query_params = {
-        "KeyConditionExpression" : Key("term").eq(f'{request.semester}-{request.year}')
+        "KeyConditionExpression" : Key("variable_name").eq("auto_enrollment_enabled")
     }
     return query_params
 
-def generate_update_enrollment_period_params(request: EnrollmentPeriod):
+def generate_update_enrollment_period_params(enabled: bool):
     update_params = {
         "Key" : {
-            "term" : f'{request.semester}-{request.year}',
-            "year" : request.year
+            "variable_name" : "auto_enrollment_enabled"
         },
-        "UpdateExpression" : "SET #auto_enrollment_enabled = :i",
+        "UpdateExpression" : "SET #value = :i",
         "ExpressionAttributeValues": {
-            ":i" : request.auto_enrollment_enabled
+            ":i" : enabled
         },
         "ExpressionAttributeNames":  {
-            "#auto_enrollment_enabled" : "auto_enrollment_enabled"
+            "#value" : "value"
         },
         "ReturnValues": "UPDATED_NEW"
     }

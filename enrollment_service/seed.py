@@ -68,27 +68,19 @@ create_personnel_table_params = {
     "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3},
 }
 
-create_enrollment_period_status_table_params = {
-    "TableName":'Enrollment_Period_Status',
+create_config_table_params = {
+    "TableName":'Config',
     "KeySchema":[
         {
-            'AttributeName': 'term',
+            'AttributeName': 'variable_name',
             'KeyType': 'HASH'
-        },
-        {
-            'AttributeName': 'year',
-            'KeyType': 'RANGE'
         }
     ],
     "AttributeDefinitions":[
         {
-            'AttributeName': 'term',
+            'AttributeName': 'variable_name',
             'AttributeType': 'S'
-        },
-        {
-            'AttributeName': 'year',
-            'AttributeType': 'N'
-        }
+        }        
     ],
     "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3},
 }
@@ -190,14 +182,14 @@ create_course_table_params = {
     "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3},
 }
 
-required_tables = ["Class", "Course", "Personnel", "Enrollment_Period_Status", "Enrollment", "Waitlist_Participation"]
+required_tables = ["Class", "Course", "Personnel", "Config", "Enrollment", "Waitlist_Participation"]
 existing_tables = [table.name for table in dynamo.list_tables()]
 
 params= {
     "Class" : create_class_table_params,
     "Course" : create_course_table_params,
     "Personnel" : create_personnel_table_params,
-    "Enrollment_Period_Status" : create_enrollment_period_status_table_params,
+    "Config" : create_config_table_params,
     "Enrollment" : create_enrollment_table_params,
     "Waitlist_Participation" : create_waitlist_participation_table_params,
 }

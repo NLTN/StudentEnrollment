@@ -9,12 +9,12 @@ from .models import Course, ClassCreate, ClassPatch, EnrollmentPeriod, Personnel
 from .registrar_helper import *
 from .Dynamo import DYNAMO_TABLENAMES
 from .dependency_injection import get_or_create_user, get_current_user, get_dynamo
-from .models import EnrollmentPeriod
+from .models import Config
 
 registrar_router = APIRouter()
 
 @registrar_router.put("/auto-enrollment/", dependencies=[Depends(get_or_create_user)])
-def set_auto_enrollment(term: EnrollmentPeriod, db: Any = Depends(get_dynamo)):
+def set_auto_enrollment(config: Config, db: Any = Depends(get_dynamo)):
     """
     Endpoint for enabling/disabling automatic enrollment.
 
@@ -31,23 +31,22 @@ def set_auto_enrollment(term: EnrollmentPeriod, db: Any = Depends(get_dynamo)):
     """
 
     dynamo = db
-    query_params = generate_get_enrollment_period_params(term)
-    get_enrollment_period_status = dynamo.query(DYNAMO_TABLENAMES["enrollment_period_status"], query_params)
+    query_params = generate_get_enrollment_period_params()
+    get_enrollment_period_status = dynamo.query(DYNAMO_TABLENAMES["config"], query_params)
 
     if not get_enrollment_period_status:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"detail" : "Enrollment Period not found"})
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"detail" : "config not found"})
     
-    if get_enrollment_period_status[0]["auto_enrollment_enabled"] == term.auto_enrollment_enabled:
-        enrollment_period_status = {
-            "term" : get_enrollment_period_status[0]["term"],
-            "auto_enrollment_enabled" : get_enrollment_period_status[0]["auto_enrollment_enabled"]
+    if get_enrollment_period_status[0]["value"] == config.auto_enrollment_enabled:
+        enrollment_period_status = {            
+            "auto_enrollment_enabled" : get_enrollment_period_status[0]["value"]
         }
         return JSONResponse(status_code=HTTPStatus.OK, content={"message" : enrollment_period_status})
 
-    update_params = generate_update_enrollment_period_params(term)
-    result = dynamo.update_item(DYNAMO_TABLENAMES["enrollment_period_status"] ,update_params)
+    update_params = generate_update_enrollment_period_params(config.auto_enrollment_enabled)
+    result = dynamo.update_item(DYNAMO_TABLENAMES["config"] ,update_params)
 
-    return JSONResponse(status_code=HTTPStatus.OK, content={"message" : f'updated enrollment period ({term.semester}-{term.year}) successfully', "detail": result})
+    return JSONResponse(status_code=HTTPStatus.OK, content={"message" : f'updated enrollment period successfully', "detail": result})
 
     # try:
     #     db.execute("UPDATE configs set automatic_enrollment = ?;", [enabled])
