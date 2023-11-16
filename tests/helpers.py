@@ -18,7 +18,7 @@ def unittest_setUp():
 
     # Reset Enrollment service database
     os.system("sh ./bin/seed.sh > /dev/null")
-    os.system("python3 enrollment_service/sample_data.py")
+    os.system("python3 tests/sample_data.py")
 
 def unittest_tearDown():
     if USING_LITEFS_TO_REPLICATE_USER_DATABASE:
@@ -30,7 +30,7 @@ def unittest_tearDown():
         os.system(f"[ ! -f {USER_DB_PATH}.backup ] || mv {USER_DB_PATH}.backup {USER_DB_PATH}")
 
     # Reset Enrollment service database
-    # os.system("sh ./bin/seed.sh > /dev/null")
+    os.system("sh ./bin/seed.sh > /dev/null")
 
 def user_register(user_id, username, password, first_name, last_name, roles: list[str]):
     url = f'{BASE_URL}/api/register'
