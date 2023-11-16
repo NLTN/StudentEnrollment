@@ -7,7 +7,7 @@ DYNAMO_TABLENAMES = {
     "course" : "Course",
     "personnel" : "Personnel",
     "enrollment" : "Enrollment",
-    "enrollment_period_status" : "Enrollment_Period_Status",
+    "config" : "Config",
     "waitlist_participation" : "Waitlist_Participation"
 }
 

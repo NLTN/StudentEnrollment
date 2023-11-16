@@ -15,10 +15,9 @@ class Personnel(BaseModel):
     last_name: str
     roles: list[str]
 
-class EnrollmentPeriod(BaseModel):
-    semester: str
-    year: int
-    auto_enrollment_enabled: bool
+
+class Config(BaseModel):
+    auto_enrollment_enabled : bool
 
 class PatchInstructor(BaseModel):
     cwid: int
