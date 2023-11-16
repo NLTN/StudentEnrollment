@@ -5,11 +5,10 @@ from fastapi import Depends, Response, HTTPException, Body, status, APIRouter, R
 from fastapi.responses import JSONResponse
 from .db_connection import get_db
 # from .enrollment_helper import enroll_students_from_waitlist, get_available_classes_within_first_2weeks
-from .models import Course, ClassCreate, ClassPatch, EnrollmentPeriod, Personnel
+from .models import Course, ClassCreate, ClassPatch, Config, Personnel
 from .registrar_helper import *
 from .Dynamo import DYNAMO_TABLENAMES
 from .dependency_injection import get_or_create_user, get_current_user, get_dynamo
-from .models import Config
 
 registrar_router = APIRouter()
 
