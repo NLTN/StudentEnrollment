@@ -23,9 +23,10 @@ class PatchInstructor(BaseModel):
     cwid: int
 
 class ClassCreate(BaseModel):
+    id: int
     department_code: str
-    course_no: str
-    section_no: str
+    course_no: int
+    section_no: int
     year: int
     semester: str
     instructor_id: int
@@ -33,7 +34,7 @@ class ClassCreate(BaseModel):
 
 class Course(BaseModel):
     department_code: str
-    course_no: str
+    course_no: int
     title: str
 
 

@@ -7,8 +7,9 @@ from .db_connection import get_db
 # from .enrollment_helper import enroll_students_from_waitlist, get_available_classes_within_first_2weeks
 from .models import Course, ClassCreate, ClassPatch, Config, Personnel
 from .registrar_helper import *
-from .Dynamo import DYNAMO_TABLENAMES
+from .Dynamo import Dynamo, DYNAMO_TABLENAMES
 from .dependency_injection import get_or_create_user, get_current_user, get_dynamo
+from botocore.exceptions import ClientError
 
 registrar_router = APIRouter()
 
@@ -63,7 +64,7 @@ def set_auto_enrollment(config: Config, db: Any = Depends(get_dynamo)):
     # return {"detail": f"Auto enrollment: {enabled}"}
 
 @registrar_router.post("/courses/", dependencies=[Depends(get_or_create_user)])
-def create_course(course: Course, db: Any = Depends(get_dynamo)):
+def create_course(course: Course, db: Dynamo = Depends(get_dynamo)):
     """
     Creates a new course with the provided details.
 
@@ -89,30 +90,14 @@ def create_course(course: Course, db: Any = Depends(get_dynamo)):
     if db.put_item(tablename=DYNAMO_TABLENAMES["course"], item=new_course):
         return JSONResponse(status_code=HTTPStatus.CREATED, content={"message": "class added successfully", "data" : new_course})
 
-
-
-    # record = dict(course)
-    # try:
-    #     cur = db.execute(
-    #         """
-    #         INSERT INTO course(department_code, course_no, title)
-    #         VALUES(:department_code, :course_no, :title)
-    #         """, record)
-    #     db.commit()
-    # except sqlite3.IntegrityError as e:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_409_CONFLICT,
-    #         detail={"type": type(e).__name__, "msg": str(e)},
-    #     )
-    # return record
-
 @registrar_router.post("/classes/",  dependencies=[Depends(get_or_create_user)])
-def create_class(new_class: ClassCreate, db: Any = Depends(get_dynamo)):
+def create_class(new_class: ClassCreate, db: Dynamo = Depends(get_dynamo)):
     """
     Creates a new class.
 
     Parameters:
     - `class` (ClassCreate): The JSON object representing the class with the following properties:
+        - `id` (int): Unique ID
         - `department_code` (str): Department code.
         - `course_no` (int): Course number.
         - `section_no` (int): Section number.
@@ -139,16 +124,6 @@ def create_class(new_class: ClassCreate, db: Any = Depends(get_dynamo)):
         }
     }
 
-    get_class_params = {
-        "Get" : {
-            "TableName" : DYNAMO_TABLENAMES["class"],
-            "Key" : {
-                "term" : f'{new_class.semester}-{new_class.year}',
-                "class" : f'{new_class.department_code}-{new_class.course_no}-{new_class.section_no}'
-            }
-        }
-    }
-
     get_instructor_params = {
         "Get" : {
             "TableName" : DYNAMO_TABLENAMES["personnel"],
@@ -158,52 +133,38 @@ def create_class(new_class: ClassCreate, db: Any = Depends(get_dynamo)):
         }
     }
 
-    # minimizing disk hits for better performance
-    query_results = db.transact_get_items(transact_items=[get_course_params, get_class_params, get_instructor_params])
+    try:
+        query_results = db.transact_get_items(transact_items=[get_course_params, get_instructor_params])
+        
+        if not query_results[0]:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Course information not found")
+        
+        if not query_results[1] or not "Instructor" in query_results[1]["Item"]["roles"]:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Instructor not found")
+        
+        # Specify the condition expression to check if the item does not already exist
+        condition_expression = "attribute_not_exists(id)"
+        
+        # Convert to Python dictionary
+        item = dict(new_class)
+        
+        if db.put_item(tablename=DYNAMO_TABLENAMES["class"], item=item, ConditionExpression=condition_expression):
+            return JSONResponse(status_code=HTTPStatus.CREATED, content={"message": "Created class successfully", "data" : item})
     
-    if not query_results[0]:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Course information not found")
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="Item already exists")
+        else:
+            raise Exception(e.response)
     
-    if query_results[1]:
-        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="This class already exists")
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
     
-    if not query_results[2] or not "Instructor" in query_results[2]["Item"]["roles"]:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Instructor not found")
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
     
-    slugs = {
-        "class" : f'{new_class.department_code}-{new_class.course_no}-{new_class.section_no}',
-        "term" : f'{new_class.semester}-{new_class.year}'
-        }
-    
-    item = dict(new_class)
-    item.update(slugs)
-    
-    if db.put_item(tablename=DYNAMO_TABLENAMES["class"], item=item):
-        return JSONResponse(status_code=HTTPStatus.CREATED, content={"message": "Created class successfully", "data" : item})
-
-
-    # record = dict(body_data)
-    # try:
-    #     cur = db.execute(
-    #         """
-    #         INSERT INTO class(dept_code, course_num, section_no, 
-    #                 academic_year, semester, instructor_id, room_num, room_capacity, 
-    #                 course_start_date, enrollment_start, enrollment_end)
-    #         VALUES(:dept_code, :course_num, :section_no,
-    #                 :academic_year, :semester, :instructor_id, :room_num, :room_capacity, 
-    #                 :course_start_date, :enrollment_start, :enrollment_end)
-    #         """, record)
-    #     db.commit()
-    # except sqlite3.IntegrityError as e:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_409_CONFLICT,
-    #         detail={"type": type(e).__name__, "msg": str(e)},
-    #     )
-    # response.headers["Location"] = f"/classes/{cur.lastrowid}"
-    # return {"detail": "Success", "inserted_id": cur.lastrowid}
-
-@registrar_router.delete("/classes/{class_term_slug}", dependencies=[Depends(get_or_create_user)])
-def delete_class(class_term_slug : str, db: Any = Depends(get_dynamo)):
+@registrar_router.delete("/classes/{class_id}", dependencies=[Depends(get_or_create_user)])
+def delete_class(class_id : int, db: Dynamo = Depends(get_dynamo)):
     """
     Deletes a specific class.
 
@@ -219,48 +180,29 @@ def delete_class(class_term_slug : str, db: Any = Depends(get_dynamo)):
     - HTTPException (400): If invalid class_term_slug was passed.
     - HTTPException (404): If the class with class_term_slug is not found.
     """
-    args = class_term_slug.split("_")
-    if len(args) != 2:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="invalid class term. class term must be in the format of $term_$class")
-    
-    term, _class = args
-    
-    query_params = {
-        "KeyConditionExpression" : Key("term").eq(term) & Key("class").eq(_class)
-    }
-
-    get_class = db.query(DYNAMO_TABLENAMES["class"], query_params)
-
-    if not get_class:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="class not found")
-    
-    delete_params = {
-        "Key": {
-            "term" : term,
-            "class" : _class
+    try:
+        delete_params = {
+            "Key": {
+                "id" : class_id
+            },
+            "ConditionExpression": "attribute_exists(id)", #check if the item already exists
         }
-    }
 
-    if db.delete_item(tablename=DYNAMO_TABLENAMES["class"], delete_params=delete_params):
-        return JSONResponse(status_code=HTTPStatus.OK, content={"message" : "deleted class successfully"})
-    # try:
-    #     curr = db.execute("DELETE FROM class WHERE id=?;", [id])
-
-    #     if curr.rowcount == 0:
-    #         raise HTTPException(
-    #             status_code=status.HTTP_404_NOT_FOUND, detail="Record Not Found"
-    #         )
-    #     db.commit()
-    # except sqlite3.IntegrityError as e:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_409_CONFLICT,
-    #         detail={"type": type(e).__name__, "msg": str(e)},
-    #     )
-
-    # return {"detail": "Item deleted successfully"}
-
-@registrar_router.patch("/classes/{class_term_slug}", dependencies=[Depends(get_or_create_user)])
-def update_class_instructor(instructor: PatchInstructor, class_term_slug : str, db: Any = Depends(get_dynamo)):
+        if db.delete_item(tablename=DYNAMO_TABLENAMES["class"], delete_params=delete_params):
+            return JSONResponse(status_code=HTTPStatus.OK, content={"message" : "Item deleted successfully"})
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Item Not Found")
+        else:
+            raise Exception(e.response)
+    
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
+    
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
+@registrar_router.patch("/classes/{class_id}", dependencies=[Depends(get_or_create_user)])
+def update_class_instructor(instructor: PatchInstructor, class_id : int, db: Dynamo = Depends(get_dynamo)):
     """
     Updates instructor information for a class.
 
@@ -275,91 +217,53 @@ def update_class_instructor(instructor: PatchInstructor, class_term_slug : str, 
     Raises:
     - HTTPException (404): If the class with the specified ID, or instructor is not found.
     """
-    args = class_term_slug.split("_")
-
-    if len(args) != 2:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="invalid class term")
-    
-    term, _class = args
-
-    get_class_params = {
-        "Get" : {
-            "TableName" : DYNAMO_TABLENAMES["class"],
-            "Key" : {
-                "term" : term,
-                "class" : _class
+    try:
+        get_instructor_params = {
+            "Get": {
+                "TableName" : DYNAMO_TABLENAMES["personnel"],
+                "Key" : {
+                    "cwid" : instructor.cwid
+                }
             }
         }
-    }
 
-    get_instructor_params = {
-        "Get": {
-            "TableName" : DYNAMO_TABLENAMES["personnel"],
+        transact_items = [get_instructor_params]
+        query_results = db.transact_get_items(transact_items=transact_items)
+        
+        if not query_results[0] or not "Instructor" in query_results[0]["Item"]["roles"]:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="instructor information not found")
+
+        update_instructor_params = {
             "Key" : {
-                "cwid" : instructor.cwid
-            }
+                "id" : class_id
+            },
+            "ConditionExpression": "attribute_exists(id)", #check if the item already exists
+            "UpdateExpression" : "SET #instructor_id = :v1, #instructor_first_name = :v2, #instructor_last_name = :v3",
+            "ExpressionAttributeValues" : {
+                ":v1" : instructor.cwid,
+                ":v2" : query_results[0]["Item"]["first_name"],
+                ":v3" : query_results[0]["Item"]["last_name"]
+            },
+            "ExpressionAttributeNames" : {
+                "#instructor_id" : "instructor_id",
+                "#instructor_first_name" : "instructor_first_name",
+                "#instructor_last_name" : "instructor_last_name"
+            },
+            "ReturnValues" : "UPDATED_NEW"
         }
-    }
 
-    transact_items = [get_class_params, get_instructor_params]
-    query_results = db.transact_get_items(transact_items=transact_items)
-
-    if not query_results[0]:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="class information not found")
+        db.update_item(tablename=DYNAMO_TABLENAMES["class"], update_params = update_instructor_params)
+        
+        return JSONResponse(status_code=HTTPStatus.OK, content={"message" : "updated instructor for class successfully"})
     
-    if not query_results[1] or not "Instructor" in query_results[1]["Item"]["roles"]:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="instructor information not found")
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Item Not Found")
+        else:
+            raise Exception(e.response)
     
-    update_instructor_params = {
-        "Key" : {
-            "term" : term,
-            "class" : _class
-        },
-        "UpdateExpression" : "SET #instructor_id = :v1, #instructor_first_name = :v2, #instructor_last_name = :v3",
-        "ExpressionAttributeValues" : {
-            ":v1" : instructor.cwid,
-            ":v2" : query_results[1]["Item"]["first_name"],
-            ":v3" : query_results[1]["Item"]["last_name"]
-        },
-        "ExpressionAttributeNames" : {
-            "#instructor_id" : "instructor_id",
-            "#instructor_first_name" : "instructor_first_name",
-            "#instructor_last_name" : "instructor_last_name"
-        },
-        "ReturnValues" : "UPDATED_NEW"
-    }
-
-    db.update_item(tablename=DYNAMO_TABLENAMES["class"], update_params = update_instructor_params)
-
-    return JSONResponse(status_code=HTTPStatus.OK, content={"message" : "updated instructor for class successfully"})
-    # try:
-    #     # Excluding fields that have not been set
-    #     data_fields = body_data.dict(exclude_unset=True)
-
-    #     # Create a list of column-placeholder pairs, separated by commas
-    #     keys = ", ".join(
-    #         [f"{key} = ?" for index, key in enumerate(data_fields.keys())]
-    #     )
-
-    #     # Create a list of values to bind to the placeholders
-    #     values = list(data_fields.values())  # List of values to be updated
-    #     values.append(id)  # WHERE id = ?
-
-    #     # Define a parameterized query with placeholders & values
-    #     update_query = f"UPDATE class SET {keys} WHERE id = ?"
-
-    #     # Execute the query
-    #     curr = db.execute(update_query, values)
-
-    #     # Raise exeption if Record not Found
-    #     if curr.rowcount == 0:
-    #         raise HTTPException(
-    #             status_code=status.HTTP_404_NOT_FOUND, detail="Record Not Found"
-    #         )
-    #     db.commit()
-    # except sqlite3.Error as e:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_409_CONFLICT,
-    #         detail={"type": type(e).__name__, "msg": str(e)},
-    #     )
-    # return {"message": "Item updated successfully"}
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
+    
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")

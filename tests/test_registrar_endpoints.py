@@ -5,7 +5,6 @@ from tests.helpers import *
 from tests.settings import BASE_URL, USER_DB_PATH, ENROLLMENT_DB_PATH
 from tests.dynamodb import DynamoDB
 from boto3.dynamodb.conditions import Key
-
 class AutoEnrollmentTest(unittest.TestCase):
     def setUp(self):
         unittest_setUp()
@@ -58,8 +57,6 @@ class AutoEnrollmentTest(unittest.TestCase):
         # Assert
         self.assertEqual(response.status_code, 200)
         # self.assertIn("detail", response.json())
-
-
 class CreateCourseTest(unittest.TestCase):
     def setUp(self):
         unittest_setUp()
@@ -116,8 +113,6 @@ class CreateCourseTest(unittest.TestCase):
 
         # Assert
         self.assertEqual(response.status_code, 409)
-
-
 class CreateClassTest(unittest.TestCase):
     def setUp(self):
         unittest_setUp()
@@ -132,7 +127,7 @@ class CreateClassTest(unittest.TestCase):
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
         # Send request
-        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, access_token)
+        response = create_class(99999, "SOC", 301, 2, 2024, "FA", 1, 10, access_token)
 
         # Assert
         self.assertEqual(response.status_code, 200)
@@ -144,9 +139,9 @@ class CreateClassTest(unittest.TestCase):
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
         # Send request
-        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, access_token)
+        response = create_class(99999, "SOC", "301", "2", 2024, "FA", 1, 10, access_token)
 
-        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, access_token)
+        response = create_class(99999, "SOC", "301", "2", 2024, "FA", 1, 10, access_token)
 
         # Assert
         self.assertEqual(response.status_code, 409)
@@ -157,18 +152,13 @@ class CreateClassTest(unittest.TestCase):
                       "nguyen", ["Student", "Registrar"])
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
-        # Setup
+        # Data
+        item_id = 99999
         old_instructor_id = 1
         new_instructor_id = 2
 
-        # Create a class
-        response = create_class("SOC", "301", "1", 2024, "FA", old_instructor_id, 10, access_token)
-
-        inserted_data = response.json()["data"]
-        partition_key_value = inserted_data["term"]
-        sort_key_value = inserted_data["class"]
-
-        class_term_slug = f"{partition_key_value}_{sort_key_value}"
+        # Create a class        
+        response = create_class(item_id, "SOC", "301", "1", 2024, "FA", old_instructor_id, 10, access_token)
 
         # Prepare header & message body        
         headers = {
@@ -180,22 +170,55 @@ class CreateClassTest(unittest.TestCase):
         }
 
         # Send request
-        url = f'{BASE_URL}/api/classes/{class_term_slug}'
+        url = f'{BASE_URL}/api/classes/{item_id}'
         response = requests.patch(url, headers=headers, json=body)
-
 
         # Direct Access DB to check if data has been updated successfully
         query_params = {
-            "KeyConditionExpression": Key("term").eq(partition_key_value) 
-                                    & Key("class").eq(sort_key_value)
+            "KeyConditionExpression": Key("id").eq(item_id)
         }
         db = DynamoDB()
-        items = db.query("Class", query_params)
+        items = db.query("Classes", query_params)
 
         # Assert
         self.assertGreater(len(items), 0)
         self.assertEqual(items[0]["instructor_id"], new_instructor_id)
         self.assertEqual(response.status_code, 200)
+
+    def test_update_nonexisting_class(self):
+        # Register & Login
+        user_register(101, "abc@csu.fullerton.edu", "1234", "nathan",
+                      "nguyen", ["Student", "Registrar"])
+        access_token = user_login("abc@csu.fullerton.edu", password="1234")
+
+        # Data
+        item_id = 99999
+        old_instructor_id = 1
+        new_instructor_id = 22
+
+        # Prepare header & message body        
+        headers = {
+            "Content-Type": "application/json;",
+            "Authorization": f"Bearer {access_token}"
+        }
+        body = {
+            "cwid": new_instructor_id
+        }
+
+        # Send request
+        url = f'{BASE_URL}/api/classes/{item_id}'
+        response = requests.patch(url, headers=headers, json=body)
+
+
+        # Direct Access DB to check if data has been updated successfully
+        query_params = {
+            "KeyConditionExpression": Key("id").eq(item_id)
+        }
+        db = DynamoDB()
+        items = db.query("Classes", query_params)
+
+        # Assert
+        self.assertEqual(response.status_code, 404)
 
     def test_delete_class(self):
         # Register & Login
@@ -203,14 +226,12 @@ class CreateClassTest(unittest.TestCase):
                       "nguyen", ["Student", "Registrar"])
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
+        # Data
+        item_id = 99999
+        instructor_id = 1
+
         # Create a class
-        response = create_class("SOC", "301", "1", 2024, "FA", 1, 10, access_token)
-
-        inserted_data = response.json()["data"]
-        partition_key_value = inserted_data["term"]
-        sort_key_value = inserted_data["class"]
-
-        class_term_slug = f"{partition_key_value}_{sort_key_value}"
+        response = create_class(item_id, "SOC", "301", "1", 2024, "FA", instructor_id, 10, access_token)
 
         # Prepare header & message body        
         headers = {
@@ -219,16 +240,12 @@ class CreateClassTest(unittest.TestCase):
         }
 
         # Send request
-        url = f'{BASE_URL}/api/classes/{class_term_slug}'
+        url = f'{BASE_URL}/api/classes/{item_id}'
         response = requests.delete(url, headers=headers)
         
         # Direct Access DB to check if data has been updated successfully
-        query_params = {
-            "KeyConditionExpression": Key("term").eq(partition_key_value) 
-                                    & Key("class").eq(sort_key_value)
-        }
         db = DynamoDB()
-        items = db.query("Class", query_params)
+        items = db.query("Classes", {"KeyConditionExpression": Key("id").eq(item_id)})
 
         # Assert
         self.assertEqual(len(items), 0)
@@ -240,7 +257,8 @@ class CreateClassTest(unittest.TestCase):
                       "nguyen", ["Student", "Registrar"])
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
-        inserted_id = "9999_ABC-12"
+        # Data
+        item_id = 99999
 
         # Prepare header & message body        
         headers = {
@@ -249,32 +267,11 @@ class CreateClassTest(unittest.TestCase):
         }
 
         # Send request
-        url = f'{BASE_URL}/api/classes/{inserted_id}'
+        url = f'{BASE_URL}/api/classes/{item_id}'
         response = requests.delete(url, headers=headers)
         
         # Assert
         self.assertEqual(response.status_code, 404)
-        
-    def test_delete_class_invalid_id(self):
-        # Register & Login
-        user_register(2, "abc@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student", "Registrar"])
-        access_token = user_login("abc@csu.fullerton.edu", password="1234")
-
-        inserted_id = 999
-
-        # Prepare header & message body        
-        headers = {
-            "Content-Type": "application/json;",
-            "Authorization": f"Bearer {access_token}"
-        }
-
-        # Send request
-        url = f'{BASE_URL}/api/classes/{inserted_id}'
-        response = requests.delete(url, headers=headers)
-        
-        # Assert
-        self.assertEqual(response.status_code, 400)
-        
+    
 if __name__ == '__main__':
     unittest.main()

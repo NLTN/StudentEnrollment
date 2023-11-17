@@ -30,7 +30,7 @@ def unittest_tearDown():
         os.system(f"[ ! -f {USER_DB_PATH}.backup ] || mv {USER_DB_PATH}.backup {USER_DB_PATH}")
 
     # Reset Enrollment service database
-    os.system("sh ./bin/seed.sh > /dev/null")
+    # os.system("sh ./bin/seed.sh > /dev/null")
 
 def user_register(user_id, username, password, first_name, last_name, roles: list[str]):
     url = f'{BASE_URL}/api/register'
@@ -59,14 +59,15 @@ def user_login(username, password):
     
     return None
 
-def create_class(dept_code, course_no, section_no, academic_year, semester,
+def create_class(id, dept_code, course_no, section_no, academic_year, semester,
                 instructor_id, room_capacity, access_token):
-    # Prepare header & message body        
+    # Prepare header & message body
     headers = {
         "Content-Type": "application/json;",
         "Authorization": f"Bearer {access_token}"
     }
     body = {
+        "id": id,
         "department_code": dept_code,
         "course_no": course_no,
         "section_no": section_no,

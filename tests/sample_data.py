@@ -4,11 +4,11 @@ import boto3
 dynamodb = boto3.resource("dynamodb", endpoint_url = "http://localhost:8000")
 
 def insert_courses():
-    table_name = "Course"
+    table_name = "Courses"
     table = dynamodb.Table(table_name)
     sample_data = [
-        {"department_code": "CPSC", "course_no": "999", "title": "TEST 999"},
-        {"department_code": "SOC", "course_no": "301", "title": "TEST 301"},
+        {"department_code": "CPSC", "course_no": 999, "title": "TEST 999"},
+        {"department_code": "SOC", "course_no": 301, "title": "TEST 301"},
     ]
     for item in sample_data:
         table.put_item(Item=item)
