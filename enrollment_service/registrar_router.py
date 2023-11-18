@@ -13,7 +13,7 @@ from botocore.exceptions import ClientError
 
 registrar_router = APIRouter()
 
-@registrar_router.put("/auto-enrollment/", dependencies=[Depends(get_or_create_user)])
+@registrar_router.put("/auto-enrollment/")
 def set_auto_enrollment(config: Config, db: Any = Depends(get_dynamo)):
     """
     Endpoint for enabling/disabling automatic enrollment.
@@ -63,7 +63,7 @@ def set_auto_enrollment(config: Config, db: Any = Depends(get_dynamo)):
 
     # return {"detail": f"Auto enrollment: {enabled}"}
 
-@registrar_router.post("/courses/", dependencies=[Depends(get_or_create_user)])
+@registrar_router.post("/courses/")
 def create_course(course: Course, db: Dynamo = Depends(get_dynamo)):
     """
     Creates a new course with the provided details.
@@ -87,11 +87,14 @@ def create_course(course: Course, db: Dynamo = Depends(get_dynamo)):
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="Specified course already exists!")
     
     new_course = dict(course)
-    if db.put_item(tablename=DYNAMO_TABLENAMES["course"], item=new_course):
+    data = {
+        "Item": new_course
+    }
+    if db.dyn_resource.Table(DYNAMO_TABLENAMES["course"]).put_item(**data):
         return JSONResponse(status_code=HTTPStatus.CREATED, content={"message": "class added successfully", "data" : new_course})
 
 @registrar_router.post("/classes/",  dependencies=[Depends(get_or_create_user)])
-def create_class(new_class: ClassCreate, db: Dynamo = Depends(get_dynamo)):
+def create_class(new_class: ClassCreate, db: Dynamo= Depends(get_dynamo)):
     """
     Creates a new class.
 
@@ -134,21 +137,21 @@ def create_class(new_class: ClassCreate, db: Dynamo = Depends(get_dynamo)):
     }
 
     try:
-        query_results = db.transact_get_items(transact_items=[get_course_params, get_instructor_params])
-        
-        if not query_results[0]:
+        results = db.transact_get_items([get_course_params, get_instructor_params])
+
+        if not results[0]:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Course information not found")
         
-        if not query_results[1] or not "Instructor" in query_results[1]["Item"]["roles"]:
+        if not results[1] or not "Instructor" in results[1]["Item"]["roles"]:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Instructor not found")
-        
-        # Specify the condition expression to check if the item does not already exist
-        condition_expression = "attribute_not_exists(id)"
         
         # Convert to Python dictionary
         item = dict(new_class)
-        
-        if db.put_item(tablename=DYNAMO_TABLENAMES["class"], item=item, ConditionExpression=condition_expression):
+        data = {
+            "Item": item,
+            "ConditionExpression": "attribute_not_exists(id)" #check if the item does not already exist
+        }
+        if db.dyn_resource.Table(DYNAMO_TABLENAMES["class"]).put_item(**data):
             return JSONResponse(status_code=HTTPStatus.CREATED, content={"message": "Created class successfully", "data" : item})
     
     except ClientError as e:
@@ -163,7 +166,7 @@ def create_class(new_class: ClassCreate, db: Dynamo = Depends(get_dynamo)):
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
     
-@registrar_router.delete("/classes/{class_id}", dependencies=[Depends(get_or_create_user)])
+@registrar_router.delete("/classes/{class_id}")
 def delete_class(class_id : int, db: Dynamo = Depends(get_dynamo)):
     """
     Deletes a specific class.
@@ -201,6 +204,7 @@ def delete_class(class_id : int, db: Dynamo = Depends(get_dynamo)):
     
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
+
 @registrar_router.patch("/classes/{class_id}", dependencies=[Depends(get_or_create_user)])
 def update_class_instructor(instructor: PatchInstructor, class_id : int, db: Dynamo = Depends(get_dynamo)):
     """
@@ -227,8 +231,7 @@ def update_class_instructor(instructor: PatchInstructor, class_id : int, db: Dyn
             }
         }
 
-        transact_items = [get_instructor_params]
-        query_results = db.transact_get_items(transact_items=transact_items)
+        query_results = db.transact_get_items([get_instructor_params])
         
         if not query_results[0] or not "Instructor" in query_results[0]["Item"]["roles"]:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="instructor information not found")

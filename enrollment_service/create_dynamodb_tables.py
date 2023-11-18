@@ -1,11 +1,11 @@
-from .Dynamo import Dynamo
+from .Dynamo import Dynamo, DYNAMO_TABLENAMES
 from .models import Settings
 
 settings = Settings()
 dynamo = Dynamo(config=settings)
 
 create_class_table_params = {
-    "TableName":"Classes",
+    "TableName": DYNAMO_TABLENAMES["class"],
     "KeySchema":[
         {
             "AttributeName": "id",
@@ -22,7 +22,7 @@ create_class_table_params = {
 }
 
 create_course_table_params = {
-    "TableName":'Courses',
+    "TableName": DYNAMO_TABLENAMES["course"],
     "KeySchema":[
         {
             'AttributeName': 'department_code',
@@ -47,7 +47,7 @@ create_course_table_params = {
 }
 
 create_personnel_table_params = {
-    "TableName":"Personnel",
+    "TableName": DYNAMO_TABLENAMES["personnel"],
     "KeySchema":[
         {
             "AttributeName": "cwid",
@@ -64,7 +64,7 @@ create_personnel_table_params = {
 }
 
 create_config_table_params = {
-    "TableName":'Configs',
+    "TableName": DYNAMO_TABLENAMES["config"],
     "KeySchema":[
         {
             'AttributeName': 'variable_name',
@@ -81,7 +81,7 @@ create_config_table_params = {
 }
 
 create_enrollment_table_params = {
-    "TableName":"Enrollments",
+    "TableName": DYNAMO_TABLENAMES["enrollment"],
     "KeySchema":[
         {
             "AttributeName": "class_id",
@@ -124,15 +124,21 @@ create_enrollment_table_params = {
     ]
 }
 
-required_tables = ["Classes", "Courses", "Personnel", "Configs","Enrollments"]
+required_tables = [
+                    DYNAMO_TABLENAMES["class"], 
+                    DYNAMO_TABLENAMES["course"], 
+                    DYNAMO_TABLENAMES["personnel"], 
+                    DYNAMO_TABLENAMES["config"],
+                    DYNAMO_TABLENAMES["enrollment"]
+                ]
 existing_tables = [table.name for table in dynamo.list_tables()]
 
 params= {
-    "Classes" : create_class_table_params,
-    "Courses" : create_course_table_params,
-    "Personnel" : create_personnel_table_params,
-    "Configs" : create_config_table_params,
-    "Enrollments" : create_enrollment_table_params,
+    DYNAMO_TABLENAMES["class"]: create_class_table_params,
+    DYNAMO_TABLENAMES["course"]: create_course_table_params,
+    DYNAMO_TABLENAMES["personnel"]: create_personnel_table_params,
+    DYNAMO_TABLENAMES["config"]: create_config_table_params,
+    DYNAMO_TABLENAMES["enrollment"]: create_enrollment_table_params,
 }
 
 
@@ -148,4 +154,4 @@ item = {
     "value" : True
 }
 
-dynamo.put_item(tablename="Configs", item=item)
+dynamo.put_item(tablename=DYNAMO_TABLENAMES["config"], item=item)

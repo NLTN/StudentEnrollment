@@ -3,11 +3,11 @@ from botocore.exceptions import ClientError
 from .models import Settings
 
 DYNAMO_TABLENAMES = {
-    'class' : "Classes",
-    "course" : "Courses",
+    'class' : "Class",
+    "course" : "Course",
     "personnel" : "Personnel",
-    "enrollment" : "Enrollments",
-    "config" : "Configs",
+    "enrollment" : "Enrollment",
+    "config" : "Config",
     "waitlist_participation" : "Waitlist_Participation"
 }
 
@@ -49,13 +49,11 @@ class Dynamo:
          except ClientError as err:
               raise err
     
-    def put_item(self, tablename: str, item: dict, ConditionExpression=None):
+    def put_item(self, tablename: str, item: dict):
         try:
-            if not ConditionExpression:
-                self.dyn_resource.Table(tablename).put_item(Item=item)
-            else:
-                self.dyn_resource.Table(tablename).put_item(Item=item, ConditionExpression=ConditionExpression)
+            self.dyn_resource.Table(tablename).put_item(Item=item)
             return True
+
         except ClientError as err:
             raise err
 

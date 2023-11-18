@@ -3,7 +3,7 @@ import unittest
 import requests
 from tests.helpers import *
 from tests.settings import BASE_URL, USER_DB_PATH, ENROLLMENT_DB_PATH
-from tests.dynamodb import DynamoDB
+from tests.dynamodb import DynamoDB, DYNAMO_TABLENAMES
 from boto3.dynamodb.conditions import Key
 class AutoEnrollmentTest(unittest.TestCase):
     def setUp(self):
@@ -178,7 +178,7 @@ class CreateClassTest(unittest.TestCase):
             "KeyConditionExpression": Key("id").eq(item_id)
         }
         db = DynamoDB()
-        items = db.query("Classes", query_params)
+        items = db.query(DYNAMO_TABLENAMES["class"], query_params)
 
         # Assert
         self.assertGreater(len(items), 0)
@@ -209,14 +209,6 @@ class CreateClassTest(unittest.TestCase):
         url = f'{BASE_URL}/api/classes/{item_id}'
         response = requests.patch(url, headers=headers, json=body)
 
-
-        # Direct Access DB to check if data has been updated successfully
-        query_params = {
-            "KeyConditionExpression": Key("id").eq(item_id)
-        }
-        db = DynamoDB()
-        items = db.query("Classes", query_params)
-
         # Assert
         self.assertEqual(response.status_code, 404)
 
@@ -245,7 +237,7 @@ class CreateClassTest(unittest.TestCase):
         
         # Direct Access DB to check if data has been updated successfully
         db = DynamoDB()
-        items = db.query("Classes", {"KeyConditionExpression": Key("id").eq(item_id)})
+        items = db.query(DYNAMO_TABLENAMES["class"], {"KeyConditionExpression": Key("id").eq(item_id)})
 
         # Assert
         self.assertEqual(len(items), 0)
