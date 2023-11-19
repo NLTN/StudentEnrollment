@@ -29,4 +29,7 @@ def get_current_user(request: Request):
 def get_dynamo(request: Request):
     return request.app.state.dynamo
 
+def get_redis(request: Request):
+    return request.app.state.redis
+
 

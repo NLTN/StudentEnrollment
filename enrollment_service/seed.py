@@ -93,7 +93,7 @@ create_enrollment_table_params = {
             'KeyType': 'HASH'
         },
         {
-            'AttributeName': 'class',
+            'AttributeName': 'enrollment_slug',
             'KeyType': 'RANGE'
         }
     ],
@@ -103,12 +103,16 @@ create_enrollment_table_params = {
             'AttributeType': 'S'
         },
         {
+            'AttributeName': 'enrollment_slug',
+            'AttributeType': 'S'
+        },
+        {
             'AttributeName': 'class',
             'AttributeType': 'S'
         },
         {
             "AttributeName" : "student_cwid",
-            "AttributeType" : "S"
+            "AttributeType" : "N"
         }
     ],
     "LocalSecondaryIndexes" : [
@@ -121,6 +125,22 @@ create_enrollment_table_params = {
                 },
                 {
                     "AttributeName" : "student_cwid",
+                    "KeyType" : 'RANGE'
+                }
+            ],
+            "Projection" : {
+                "ProjectionType" : "KEYS_ONLY"
+            }
+        },
+        {
+            "IndexName" : "class_enrollment",
+            "KeySchema" : [
+                {
+                    "AttributeName" : "term",
+                    "KeyType" : "HASH"
+                },
+                {
+                    "AttributeName" : "class",
                     "KeyType" : 'RANGE'
                 }
             ],
