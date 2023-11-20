@@ -3,6 +3,7 @@ import unittest
 import requests
 from tests.helpers import *
 from tests.settings import BASE_URL, USER_DB_PATH, ENROLLMENT_DB_PATH
+from db_connection import get_redisdb
 
 class ClassTest(unittest.TestCase):
     def setUp(self):
@@ -49,9 +50,8 @@ class EnrollmentTest(unittest.TestCase):
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10,
-                                "2023-06-12", "2023-06-01 09:00:00", "2024-06-15 17:00:00", registrar_access_token)
-        class_id = response.json()["inserted_id"]
+        class_id = 99999
+        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
 
         # ------------------ Student ------------------
         # Register & Login
@@ -63,7 +63,7 @@ class EnrollmentTest(unittest.TestCase):
         response = enroll_class(class_id, student_access_token)
         
         # Assert
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 201)
 
     def test_enroll_the_same_class(self):
         # ------------------ Registrar ------------------
@@ -73,9 +73,8 @@ class EnrollmentTest(unittest.TestCase):
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10,
-                                "2023-06-12", "2023-06-01 09:00:00", "2024-06-15 17:00:00", registrar_access_token)
-        class_id = response.json()["inserted_id"]
+        class_id = 99999
+        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
 
         # ------------------ Student ------------------
         # Register & Login
@@ -103,6 +102,48 @@ class EnrollmentTest(unittest.TestCase):
         
         # Assert
         self.assertEqual(response.status_code, 404)
+
+    def test_enroll_full_class_then_placed_on_waitlist(self):
+        # ------------------ Registrar ------------------
+        # Register & Login
+        user_register(881234, "john@fullerton.edu", "1234", "john",
+                      "smith", ["Registrar"])
+        registrar_access_token = user_login("john@fullerton.edu", password="1234")
+
+        # Create a class for testing
+        class_id = 99999
+        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
+
+        # ------------------ Student 01: Enroll Success ------------------
+        # Register & Login
+        user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
+                      "nguyen", ["Student"])
+        student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
+
+        # Enroll 
+        response = enroll_class(class_id, student_access_token)
+        
+        # Assert
+        self.assertEqual(response.status_code, 201)
+
+        # ------------------ Student 02: Placed on Waitlist ------------------
+        # Register & Login
+        student_id = 88812801
+        user_register(student_id, "abc2@csu.fullerton.edu", "1234", "nathan",
+                      "nguyen", ["Student"])
+        student_access_token = user_login("abc2@csu.fullerton.edu", password="1234")
+
+        # Enroll 
+        response = enroll_class(class_id, student_access_token)
+
+        # Check if data inserted into Redis
+        rdb = get_redisdb()
+        rank = rdb.zrank(class_id, student_id)
+
+        # Assert
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNotNone(rank)
+
 
 class DropClassTest(unittest.TestCase):
     def setUp(self):
