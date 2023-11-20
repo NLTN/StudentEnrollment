@@ -1,10 +1,10 @@
-import os
 import unittest
 import requests
 from tests.helpers import *
-from tests.settings import BASE_URL, USER_DB_PATH, ENROLLMENT_DB_PATH
-from tests.dynamodb import DynamoDB, DYNAMO_TABLENAMES
+from tests.settings import BASE_URL
+from db_connection import get_dynamodb, TableNames
 from boto3.dynamodb.conditions import Key
+
 class AutoEnrollmentTest(unittest.TestCase):
     def setUp(self):
         unittest_setUp()
@@ -86,8 +86,7 @@ class CreateCourseTest(unittest.TestCase):
         response = requests.post(url, headers=headers, json=body)
 
         # Assert
-        self.assertEqual(response.status_code, 200)
-        # self.assertIn("detail", response.json())
+        self.assertEqual(response.status_code, 201)
 
     def test_create_duplicate_course(self):
         # Register & Login
@@ -130,7 +129,7 @@ class CreateClassTest(unittest.TestCase):
         response = create_class(99999, "SOC", 301, 2, 2024, "FA", 1, 10, access_token)
 
         # Assert
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 201)
 
     def test_create_duplicate_class(self):
         # Register & Login
@@ -173,17 +172,21 @@ class CreateClassTest(unittest.TestCase):
         url = f'{BASE_URL}/api/classes/{item_id}'
         response = requests.patch(url, headers=headers, json=body)
 
+        # Assert
+        self.assertEqual(response.status_code, 200)
+
         # Direct Access DB to check if data has been updated successfully
         query_params = {
             "KeyConditionExpression": Key("id").eq(item_id)
         }
-        db = DynamoDB()
-        items = db.query(DYNAMO_TABLENAMES["class"], query_params)
+        dynamodb = get_dynamodb()
+        response = dynamodb.Table(TableNames.CLASSES).query(**query_params)
+        items = response["Items"]
 
         # Assert
         self.assertGreater(len(items), 0)
         self.assertEqual(items[0]["instructor_id"], new_instructor_id)
-        self.assertEqual(response.status_code, 200)
+        
 
     def test_update_nonexisting_class(self):
         # Register & Login
@@ -235,13 +238,18 @@ class CreateClassTest(unittest.TestCase):
         url = f'{BASE_URL}/api/classes/{item_id}'
         response = requests.delete(url, headers=headers)
         
+        # Assert
+        self.assertEqual(response.status_code, 200)
+
         # Direct Access DB to check if data has been updated successfully
-        db = DynamoDB()
-        items = db.query(DYNAMO_TABLENAMES["class"], {"KeyConditionExpression": Key("id").eq(item_id)})
+        query_params = {"KeyConditionExpression": Key("id").eq(item_id)}
+        dynamodb = get_dynamodb()
+        response = dynamodb.Table(TableNames.CLASSES).query(**query_params)
+        items = response["Items"]
 
         # Assert
         self.assertEqual(len(items), 0)
-        self.assertEqual(response.status_code, 200)
+        
 
     def test_delete_nonexisting_class(self):
         # Register & Login
