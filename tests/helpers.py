@@ -20,6 +20,9 @@ def unittest_setUp():
     os.system("sh ./bin/seed.sh > /dev/null")
     os.system("python3 tests/sample_data.py")
 
+    # Reset Redis DB
+    os.system("redis-cli FLUSHDB")
+
 def unittest_tearDown():
     if USING_LITEFS_TO_REPLICATE_USER_DATABASE:
         os.system(f"[ ! -f {USER_DB_PATH} ] || rm {USER_DB_PATH}")
@@ -31,6 +34,9 @@ def unittest_tearDown():
 
     # Reset Enrollment service database
     # os.system("sh ./bin/seed.sh > /dev/null")
+
+    # Reset Redis DB
+    # os.system("redis-cli FLUSHDB")
 
 def user_register(user_id, username, password, first_name, last_name, roles: list[str]):
     url = f'{BASE_URL}/api/register'

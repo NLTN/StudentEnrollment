@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 
 
 class TableNames:
-    CONFIGS = "Config"
+    CONFIGS = "config"
     COURSES = "Course"
     CLASSES = "Class"
     ENROLLMENTS = "Enrollment"
@@ -25,7 +25,7 @@ def get_db():
     raise NotImplementedError
 
 def get_redisdb() -> Redis:
-    yield redis.Redis()
+    return redis.Redis()
 
 def get_dynamodb():
     db = boto3.resource(
@@ -35,4 +35,4 @@ def get_dynamodb():
         region_name=settings.AWS_REGION_NAME,
         endpoint_url="http://localhost:8000"
     )
-    yield db
+    return db
