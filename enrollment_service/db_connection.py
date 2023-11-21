@@ -27,11 +27,11 @@ def get_db():
     raise NotImplementedError
 
 
-def get_redisdb() -> Redis:
-    yield redis.Redis()
+def get_redisdb():
+    return redis.Redis()
 
 def get_dynamodb():
-    yield DynamoClient(settings.AWS_ACCESS_KEY_ID,
+    return DynamoClient(settings.AWS_ACCESS_KEY_ID,
                        settings.AWS_SECRET_ACCESS_KEY,
                        settings.AWS_REGION_NAME,
                        "http://localhost:8000")

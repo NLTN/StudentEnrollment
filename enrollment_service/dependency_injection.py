@@ -2,7 +2,7 @@ from .models import Personnel
 from boto3.dynamodb.conditions import Key
 from fastapi import Request
 
-def get_or_create_user(request: Request):
+def get_or_create_user(request: Request):    
     personnel_obj = {
         "cwid" : int(request.headers["x-cwid"]),
         "first_name" : request.headers["x-first-name"],
@@ -16,10 +16,13 @@ def get_or_create_user(request: Request):
         "KeyConditionExpression" : Key("cwid").eq(personnel.cwid)
     }
     
-    get_personnel = request.app.state.dynamo.query(tablename= "Personnel", query_params=query_params)
+    get_personnel = request.app.state.dynamo.query("Personnel", query_params)
     
     if not get_personnel:
-        request.app.state.dynamo.put_item(tablename="Personnel", item=personnel_obj)
+        kwargs = {
+            "Item": personnel_obj
+        }
+        request.app.state.dynamo.put_item("Personnel", kwargs)
    
     request.app.state.current_user = personnel
 

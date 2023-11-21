@@ -1,14 +1,12 @@
 from typing import Annotated, Any
-# import sqlite3
 from http import HTTPStatus
 from fastapi import Depends, Response, HTTPException, Body, status, APIRouter, Request
 from fastapi.responses import JSONResponse
+from botocore.exceptions import ClientError
 from .dynamoclient import DynamoClient
 from .db_connection import get_dynamodb, TableNames
-from .models import Course, ClassCreate, ClassPatch, Config, Personnel
-from .registrar_helper import *
 from .dependency_injection import get_or_create_user
-from botocore.exceptions import ClientError
+from .models import Course, ClassCreate, PatchInstructor, Config
 
 registrar_router = APIRouter()
 

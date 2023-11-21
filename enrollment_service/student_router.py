@@ -1,16 +1,15 @@
 from typing import Annotated, Any
-import sqlite3
 from http import HTTPStatus
-from fastapi.responses import JSONResponse
 from fastapi import Depends, HTTPException, Header, Body, status, APIRouter, Request
+from fastapi.responses import JSONResponse
+from botocore.exceptions import ClientError
 from datetime import datetime
 from redis import Redis, RedisError
 from .dynamoclient import DynamoClient
 from .db_connection import get_db, get_redisdb, get_dynamodb, TableNames
 from .enrollment_helper import enroll_students_from_waitlist, is_auto_enroll_enabled
 from .dependency_injection import *
-from .models import Personnel, ClassCreate
-from botocore.exceptions import ClientError
+from .models import ClassCreate
 
 WAITLIST_CAPACITY = 15
 MAX_NUMBER_OF_WAITLISTS_PER_STUDENT = 3
@@ -114,8 +113,8 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
 
             TransactItems = [
                 {
-                    'Put': {
-                        'TableName': TableNames.ENROLLMENTS,
+                    "Put": {
+                        "TableName": TableNames.ENROLLMENTS,
                         "Item": {
                             "class_id": class_id,
                             "student_cwid": student_id
@@ -124,22 +123,20 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
                     }
                 },
                 {
-                    'Update': {
-                        'TableName': TableNames.CLASSES,
-                        'Key': {
-                            'id': class_id
+                    "Update": {
+                        "TableName": TableNames.CLASSES,
+                        "Key": {
+                            "id": class_id
                         },
-                        'UpdateExpression': 'SET available_status = :new_value',
-                        'ExpressionAttributeValues': {
-                            ':new_value': available_status
+                        "UpdateExpression": "SET available_status = :new_value",
+                        "ExpressionAttributeValues": {
+                            ":new_value": available_status
                         }
                     }
                 }
             ]
 
-            response = dynamodb.transact_write_items(TransactItems)
-            print(response)
-            # dynamodb.put_item(TableNames.ENROLLMENTS, kwargs)
+            dynamodb.transact_write_items(TransactItems)
 
             response_json = JSONResponse(status_code=HTTPStatus.CREATED, content={
                                          "detail": "Enrolled successfully"})
@@ -198,39 +195,67 @@ def drop_class(
     - HTTPException (409): If a conflict occurs
     """
     try:
-        # ---------------------------------------------------------------------
-        # DELETE FROM enrollment table
-        # ---------------------------------------------------------------------
-        kwargs = {
-            "Key": {
-                "class_id": class_id,
-                "student_cwid": student_id
-            },
-            # check if the item exists
-            "ConditionExpression": "attribute_exists(class_id) AND attribute_exists(student_cwid)"
-        }
-        dynamodb.delete_item(TableNames.ENROLLMENTS, kwargs)
+        available_status = "true"
 
-        # ---------------------------------------------------------------------
-        # INSERT INTO droplist table
-        # ---------------------------------------------------------------------
-        kwargs = {
-            "Item": {
-                "class_id": class_id,
-                "student_cwid": student_id
+        TransactItems = [
+            {
+                # ---------------------------------------------------------------------
+                # DELETE FROM enrollment table
+                # ---------------------------------------------------------------------
+                "Delete": {
+                    "TableName": TableNames.ENROLLMENTS,
+                    "Key": {
+                        "class_id": class_id,
+                        "student_cwid": student_id
+                    },
+                    "ConditionExpression": "attribute_exists(class_id) AND attribute_exists(student_cwid)"
+                }
+            },
+            {
+                # ---------------------------------------------------------------------
+                # INSERT INTO droplist table
+                # ---------------------------------------------------------------------
+                "Put": {
+                    "TableName": TableNames.DROPLIST,
+                    "Item": {
+                        "class_id": class_id,
+                        "student_cwid": student_id
+                    }
+                }
+            },
+            {
+                # ---------------------------------------------------------------------
+                # UPDATE Class available status
+                # ---------------------------------------------------------------------
+                "Update": {
+                    "TableName": TableNames.CLASSES,
+                    "Key": {
+                        "id": class_id
+                    },
+                    "UpdateExpression": "SET available_status = :new_value",
+                    "ExpressionAttributeValues": {
+                        ":new_value": available_status
+                    }
+                }
             }
-        }
-        dynamodb.put_item(TableNames.DROPLIST, kwargs)
+        ]
+
+        dynamodb.transact_write_items(TransactItems)
 
         # ---------------------------------------------------------------------
         # Trigger auto enrollment
         # ---------------------------------------------------------------------
+        # TODO: Call the function auto_enrollment_from_waitlist()
 
     except ClientError as e:
-        print(e.response)
-        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
-                                detail="Item already exists")
+        if e.response["Error"]["Code"] == "TransactionCanceledException":
+            cancellation_reasons = e.response["CancellationReasons"]
+            if cancellation_reasons[0]["Code"] == "ConditionalCheckFailed":
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                    detail="Transaction Canceled")
+            else:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                    detail="Conflict occurs")
         else:
             raise Exception(e.response)
     except HTTPException as e:
