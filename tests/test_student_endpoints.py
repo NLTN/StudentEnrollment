@@ -49,9 +49,13 @@ class EnrollmentTest(unittest.TestCase):
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10,
-                                "2023-06-12", "2023-06-01 09:00:00", "2024-06-15 17:00:00", registrar_access_token)
-        class_id = response.json()["inserted_id"]
+        response = create_class("SOC", "301", "1", 2024, "FA", 1, 10, registrar_access_token)
+        
+        inserted_data = response.json()["data"]
+        partition_key_value = inserted_data["term"]
+        sort_key_value = inserted_data["class"]
+
+        class_term_slug = f"{partition_key_value}_{sort_key_value}"
 
         # ------------------ Student ------------------
         # Register & Login
@@ -60,7 +64,7 @@ class EnrollmentTest(unittest.TestCase):
         student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
         # Enroll 
-        response = enroll_class(class_id, student_access_token)
+        response = enroll_class(class_term_slug, student_access_token)
         
         # Assert
         self.assertEqual(response.status_code, 200)
@@ -73,9 +77,13 @@ class EnrollmentTest(unittest.TestCase):
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10,
-                                "2023-06-12", "2023-06-01 09:00:00", "2024-06-15 17:00:00", registrar_access_token)
-        class_id = response.json()["inserted_id"]
+        response = create_class("SOC", "301", "1", 2024, "FA", 1, 10, registrar_access_token)
+        
+        inserted_data = response.json()["data"]
+        partition_key_value = inserted_data["term"]
+        sort_key_value = inserted_data["class"]
+
+        class_term_slug = f"{partition_key_value}_{sort_key_value}"
 
         # ------------------ Student ------------------
         # Register & Login
@@ -84,10 +92,10 @@ class EnrollmentTest(unittest.TestCase):
         student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
         # Enroll 
-        response = enroll_class(class_id, student_access_token)
+        response = enroll_class(class_term_slug, student_access_token)
 
         # Enroll one more time
-        response = enroll_class(class_id, student_access_token)
+        response = enroll_class(class_term_slug, student_access_token)
         
         # Assert
         self.assertEqual(response.status_code, 409)
@@ -99,7 +107,7 @@ class EnrollmentTest(unittest.TestCase):
         student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
         # Enroll 
-        response = enroll_class(111111, student_access_token)
+        response = enroll_class("FA-2024_SOC-301-123456", student_access_token)
         
         # Assert
         self.assertEqual(response.status_code, 404)

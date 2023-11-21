@@ -30,7 +30,7 @@ def unittest_tearDown():
         os.system(f"[ ! -f {USER_DB_PATH}.backup ] || mv {USER_DB_PATH}.backup {USER_DB_PATH}")
 
     # Reset Enrollment service database
-    os.system("sh ./bin/seed.sh > /dev/null")
+    # os.system("sh ./bin/seed.sh > /dev/null")
 
 def user_register(user_id, username, password, first_name, last_name, roles: list[str]):
     url = f'{BASE_URL}/api/register'
@@ -88,10 +88,10 @@ def enroll_class(class_id, access_token):
         "Authorization": f"Bearer {access_token}"
     }
     body = {
-        "class_id": class_id
+        # "class_id": class_id
     }
 
     # Send request
-    url = f'{BASE_URL}/api/enrollment/'
+    url = f'{BASE_URL}/api/enrollment/{class_id}'
     response = requests.post(url, headers=headers, json=body)
     return response
