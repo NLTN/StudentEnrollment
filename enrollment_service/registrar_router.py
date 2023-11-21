@@ -172,7 +172,8 @@ def create_class(new_class: ClassCreate, db: Any = Depends(get_dynamo)):
     
     slugs = {
         "class" : f'{new_class.department_code}-{new_class.course_no}-{new_class.section_no}',
-        "term" : f'{new_class.semester}-{new_class.year}'
+        "term" : f'{new_class.semester}-{new_class.year}',
+        "enrollment_count" : 0
         }
     
     item = dict(new_class)
