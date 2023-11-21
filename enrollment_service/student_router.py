@@ -4,6 +4,7 @@ from http import HTTPStatus
 from fastapi.responses import JSONResponse
 from fastapi import Depends, HTTPException, Header, Body, status, APIRouter, Request
 from datetime import datetime
+from .dynamoclient import DynamoClient
 from .db_connection import get_db, get_redisdb, get_dynamodb, TableNames
 from .enrollment_helper import enroll_students_from_waitlist, is_auto_enroll_enabled
 from .dependency_injection import *
@@ -79,7 +80,7 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
            first_name: str = Header(alias="x-first-name"),
            last_name: str = Header(alias="x-last-name"),
            redisdb=Depends(get_redisdb),
-           dynamodb=Depends(get_dynamodb)):
+           dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Student enrolls in a class
 
@@ -97,6 +98,9 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
     - HTTPException (500): If there is an internal server error.
     """
     try:
+        # API Response data
+        response_json = {}
+
         # ---------------------------------------------------------------------
         # Get the information of the class
         # ---------------------------------------------------------------------
@@ -108,52 +112,59 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
                 }
             }
         }
-        client = dynamodb.meta.client  # A low-level client
-        response = client.transact_get_items(TransactItems=[get_class_params])
-        
-        if not response["Responses"][0]:
+        responses = dynamodb.transact_get_items([get_class_params])
+
+        if not responses[0]:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND, detail="Class Not Found")
 
-        class_info = ClassCreate(**response["Responses"][0]["Item"])
+        class_info = ClassCreate(**responses[0]["Item"])
 
         # ---------------------------------------------------------------------
         # Count the number of students enrolled in the class
         # ---------------------------------------------------------------------
-        count_params = {
+        kwargs = {
             "KeyConditionExpression": "class_id = :value",
             "ExpressionAttributeValues": {":value": class_id},
             "Select": "COUNT"
         }
-        response = dynamodb.Table(TableNames.ENROLLMENTS).query(**count_params)
+
+        response = dynamodb.query(TableNames.ENROLLMENTS, kwargs)
+
         num_students_enrolled = response["Count"]
 
         # ---------------------------------------------------------------------
         # If there is an open seat, enroll the student in the class
         # ---------------------------------------------------------------------
         if class_info.room_capacity > num_students_enrolled:
-            data = {
+            kwargs = {
                 "Item": {
                     "class_id": class_id,
                     "student_cwid": student_id
                 },
                 "ConditionExpression": "attribute_not_exists(class_id) AND attribute_not_exists(student_cwid)"
             }
-            dynamodb.Table(TableNames.ENROLLMENTS).put_item(**data)
-            return JSONResponse(status_code=HTTPStatus.CREATED, content={"detail": "Enrolled successfully"})
+
+            dynamodb.put_item(TableNames.ENROLLMENTS, kwargs)
+
+            response_json = JSONResponse(status_code=HTTPStatus.CREATED, content={
+                                         "detail": "Enrolled successfully"})
 
         # ---------------------------------------------------------------------
         # Else If the waitlist is not full, add the student to the waitlist
         # ---------------------------------------------------------------------
-        num_students_in_waitlist = redisdb.zcard(class_id)
-
-        if num_students_in_waitlist < WAITLIST_CAPACITY:
-            current_timestamp = int(datetime.utcnow().timestamp())
-            redisdb.zadd(class_id, {student_id: current_timestamp})
-            return JSONResponse(status_code=HTTPStatus.CREATED, content={"detail": "Placed on waitlist"})
         else:
-            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
-                                detail="The class & the waitlist is full")
+            num_students_on_waitlist = redisdb.zcard(class_id)
+
+            if num_students_on_waitlist < WAITLIST_CAPACITY:
+                current_timestamp = int(datetime.utcnow().timestamp())
+                redisdb.zadd(class_id, {student_id: current_timestamp})
+
+                response_json = JSONResponse(status_code=HTTPStatus.CREATED,
+                                             content={"detail": "Placed on waitlist"})
+            else:
+                raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
+                                    detail="The class & the waitlist is full")
 
     except ClientError as e:
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
@@ -166,6 +177,8 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=e)
+    else:
+        return response_json
 
 
 @student_router.delete("/enrollment/{class_id}", status_code=status.HTTP_200_OK)
@@ -173,7 +186,7 @@ def drop_class(
     class_id: int,
     student_id: int = Header(
         alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
-    db: sqlite3.Connection = Depends(get_db)
+    dynamodb: DynamoClient = Depends(get_dynamodb)
 ):
     """
     Handles a DELETE request to drop a student (himself/herself) from a specific class.
@@ -189,34 +202,48 @@ def drop_class(
     - HTTPException (409): If a conflict occurs
     """
     try:
-        curr = db.execute(
-            "DELETE FROM enrollment WHERE class_id=? AND student_id=?", [class_id, student_id])
+        # ---------------------------------------------------------------------
+        # DELETE FROM enrollment table
+        # ---------------------------------------------------------------------
+        kwargs = {
+            "Key": {
+                "class_id": class_id,
+                "student_cwid": student_id
+            },
+            # check if the item exists
+            "ConditionExpression": "attribute_exists(class_id) AND attribute_exists(student_cwid)"
+        }
+        dynamodb.delete_item(TableNames.ENROLLMENTS, kwargs)
 
-        if curr.rowcount == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Record Not Found"
-            )
+        # ---------------------------------------------------------------------
+        # INSERT INTO droplist table
+        # ---------------------------------------------------------------------
+        kwargs = {
+            "Item": {
+                "class_id": class_id,
+                "student_cwid": student_id
+            }
+        }
+        dynamodb.put_item(TableNames.DROPLIST, kwargs)
 
-        db.execute(
-            """
-            INSERT INTO droplist (class_id, student_id, drop_date, administrative) 
-            VALUES (?, ?, datetime('now'), 0);
-            """, [class_id, student_id]
-        )
-
-        db.commit()
-
+        # ---------------------------------------------------------------------
         # Trigger auto enrollment
-        if is_auto_enroll_enabled(db):
-            enroll_students_from_waitlist(db, [class_id])
+        # ---------------------------------------------------------------------
 
-    except sqlite3.IntegrityError as e:
+    except ClientError as e:
+        print(e.response)
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                                detail="Item already exists")
+        else:
+            raise Exception(e.response)
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
-
-    return {"detail": "Item deleted successfully"}
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
+    else:
+        return {"detail": "Item deleted successfully"}
 
 
 @student_router.get("/waitlist/{class_id}/position/")

@@ -1,5 +1,6 @@
 from .Dynamo import Dynamo, DYNAMO_TABLENAMES
 from .models import Settings
+from .db_connection import TableNames
 
 settings = Settings()
 dynamo = Dynamo(config=settings)
@@ -124,12 +125,38 @@ create_enrollment_table_params = {
     ]
 }
 
+create_droplist_table_params = {
+    "TableName": TableNames.DROPLIST,
+    "KeySchema":[
+        {
+            "AttributeName": "class_id",
+            "KeyType": "HASH"
+        },
+        {
+            "AttributeName": "student_cwid",
+            "KeyType": "RANGE"
+        }
+    ],
+    "AttributeDefinitions":[
+        {
+            "AttributeName": "class_id",
+            "AttributeType": "N"
+        },
+        {
+            "AttributeName": "student_cwid",
+            "AttributeType": "N"
+        }
+    ],
+    "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3}
+}
+
 required_tables = [
                     DYNAMO_TABLENAMES["class"], 
                     DYNAMO_TABLENAMES["course"], 
                     DYNAMO_TABLENAMES["personnel"], 
                     DYNAMO_TABLENAMES["config"],
-                    DYNAMO_TABLENAMES["enrollment"]
+                    DYNAMO_TABLENAMES["enrollment"],
+                    TableNames.DROPLIST
                 ]
 existing_tables = [table.name for table in dynamo.list_tables()]
 
@@ -139,6 +166,7 @@ params= {
     DYNAMO_TABLENAMES["personnel"]: create_personnel_table_params,
     DYNAMO_TABLENAMES["config"]: create_config_table_params,
     DYNAMO_TABLENAMES["enrollment"]: create_enrollment_table_params,
+    TableNames.DROPLIST: create_droplist_table_params
 }
 
 

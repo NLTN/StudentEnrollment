@@ -3,7 +3,8 @@ from typing import Annotated, Any
 from http import HTTPStatus
 from fastapi import Depends, Response, HTTPException, Body, status, APIRouter, Request
 from fastapi.responses import JSONResponse
-from .db_connection import get_db, get_dynamodb, TableNames
+from .dynamoclient import DynamoClient
+from .db_connection import get_dynamodb, TableNames
 from .models import Course, ClassCreate, ClassPatch, Config, Personnel
 from .registrar_helper import *
 from .dependency_injection import get_or_create_user
@@ -13,7 +14,7 @@ registrar_router = APIRouter()
 
 
 @registrar_router.put("/auto-enrollment/")
-def set_auto_enrollment(config: Config, dynamodb=Depends(get_dynamodb)):
+def set_auto_enrollment(config: Config, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Endpoint for enabling/disabling automatic enrollment.
 
@@ -28,29 +29,23 @@ def set_auto_enrollment(config: Config, dynamodb=Depends(get_dynamodb)):
     Returns:
         dict: A dictionary containing a detail message confirming the status of auto enrollment.
     """
-
-    query_params = generate_get_enrollment_period_params()
-    get_enrollment_period_status = dynamodb.Table(TableNames.CONFIGS).query(**query_params)
-
-    if not get_enrollment_period_status:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={
-                            "detail": "config not found"})
-
-    if get_enrollment_period_status["Items"][0]["value"] == config.auto_enrollment_enabled:
-        enrollment_period_status = {
-            "auto_enrollment_enabled": get_enrollment_period_status["Items"][0]["value"]
+    try:
+        kwargs = {
+            "Item": {
+                "variable_name": "auto_enrollment_enabled",
+                "value": config.auto_enrollment_enabled
+            }
         }
-        return JSONResponse(status_code=HTTPStatus.OK, content={"message": enrollment_period_status})
-
-    update_params = generate_update_enrollment_period_params(
-        config.auto_enrollment_enabled)
-    result = dynamodb.Table(TableNames.CONFIGS).update_item(**update_params)
-
-    return JSONResponse(status_code=HTTPStatus.OK, content={"message": f'updated enrollment period successfully', "detail": result})
+        dynamodb.put_item(TableNames.CONFIGS, kwargs)
+    except Exception as e:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
+    else:
+        return {"detail": "success"}
 
 
 @registrar_router.post("/courses/")
-def create_course(course: Course, dynamodb=Depends(get_dynamodb)):
+def create_course(course: Course, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Creates a new course with the provided details.
 
@@ -67,13 +62,11 @@ def create_course(course: Course, dynamodb=Depends(get_dynamodb)):
     - HTTPException (409): If a conflict occurs (e.g., duplicate course).
     """
     try:
-        data = {
+        kwargs = {
             "Item": dict(course),
             "ConditionExpression": "attribute_not_exists(department_code) AND attribute_not_exists(course_no)"
         }
-        dynamodb.Table(TableNames.COURSES).put_item(**data)
-        return JSONResponse(status_code=HTTPStatus.CREATED, content={"message": "Item created successfully"})
-
+        dynamodb.put_item(TableNames.COURSES, kwargs)
     except ClientError as e:
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             raise HTTPException(status_code=HTTPStatus.CONFLICT,
@@ -85,10 +78,12 @@ def create_course(course: Course, dynamodb=Depends(get_dynamodb)):
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
+    else:
+        return JSONResponse(status_code=HTTPStatus.CREATED, content={"message": "Item created successfully"})
 
 
 @registrar_router.post("/classes/",  dependencies=[Depends(get_or_create_user)])
-def create_class(new_class: ClassCreate, dynamodb=Depends(get_dynamodb)):
+def create_class(new_class: ClassCreate, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Creates a new class.
 
@@ -111,7 +106,7 @@ def create_class(new_class: ClassCreate, dynamodb=Depends(get_dynamodb)):
     - HTTPException (409): If a conflict occurs (e.g., duplicate course).
     - HTTPException (400): If course information or instructor information is not found
     """
-    get_course_params = {
+    get_course_kwargs = {
         "Get": {
             "TableName": TableNames.COURSES,
             "Key": {
@@ -121,7 +116,7 @@ def create_class(new_class: ClassCreate, dynamodb=Depends(get_dynamodb)):
         }
     }
 
-    get_instructor_params = {
+    get_instructor_kwargs = {
         "Get": {
             "TableName": TableNames.PERSONNEL,
             "Key": {
@@ -131,29 +126,21 @@ def create_class(new_class: ClassCreate, dynamodb=Depends(get_dynamodb)):
     }
 
     try:
-        client = dynamodb.meta.client  # A low-level client
-        response = client.transact_get_items(TransactItems=[get_course_params, get_instructor_params])
-        
-        results = response["Responses"]
-        
-        if not results[0]:
+        responses = dynamodb.transact_get_items(
+            [get_course_kwargs, get_instructor_kwargs])
+
+        if not responses[0]:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                                 detail="Course information not found")
 
-        if not results[1] or not "Instructor" in results[1]["Item"]["roles"]:
+        if not responses[1] or not "Instructor" in responses[1]["Item"]["roles"]:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                                 detail="Instructor not found")
-
-        # Convert to Python dictionary
-        item = dict(new_class)
         data = {
-            "Item": item,
-            # check if the item does not already exist
+            "Item": dict(new_class),
             "ConditionExpression": "attribute_not_exists(id)"
         }
-        dynamodb.Table(TableNames.CLASSES).put_item(**data)
-        return JSONResponse(status_code=HTTPStatus.CREATED, content={"message": "Created class successfully", "data": item})
-
+        dynamodb.put_item(TableNames.CLASSES, data)
     except ClientError as e:
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             raise HTTPException(status_code=HTTPStatus.CONFLICT,
@@ -165,10 +152,12 @@ def create_class(new_class: ClassCreate, dynamodb=Depends(get_dynamodb)):
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=e)
+    else:
+        return JSONResponse(status_code=HTTPStatus.CREATED, content={"detail": "Item created successfully"})
 
 
 @registrar_router.delete("/classes/{class_id}")
-def delete_class(class_id: int, dynamodb=Depends(get_dynamodb)):
+def delete_class(class_id: int, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Deletes a specific class.
 
@@ -185,16 +174,13 @@ def delete_class(class_id: int, dynamodb=Depends(get_dynamodb)):
     - HTTPException (404): If the class with class_term_slug is not found.
     """
     try:
-        delete_params = {
+        kwargs = {
             "Key": {
                 "id": class_id
             },
-            # check if the item already exists
             "ConditionExpression": "attribute_exists(id)",
         }
-        
-        dynamodb.Table(TableNames.CLASSES).delete_item(**delete_params)
-        return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Item deleted successfully"})
+        dynamodb.delete_item(TableNames.CLASSES, kwargs)
     except ClientError as e:
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             raise HTTPException(
@@ -206,10 +192,12 @@ def delete_class(class_id: int, dynamodb=Depends(get_dynamodb)):
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
+    else:
+        return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Item deleted successfully"})
 
 
 @registrar_router.patch("/classes/{class_id}", dependencies=[Depends(get_or_create_user)])
-def update_class_instructor(instructor: PatchInstructor, class_id: int, dynamodb=Depends(get_dynamodb)):
+def update_class_instructor(instructor: PatchInstructor, class_id: int, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Updates instructor information for a class.
 
@@ -225,7 +213,7 @@ def update_class_instructor(instructor: PatchInstructor, class_id: int, dynamodb
     - HTTPException (404): If the class with the specified ID, or instructor is not found.
     """
     try:
-        get_instructor_params = {
+        kwargs = {
             "Get": {
                 "TableName": TableNames.PERSONNEL,
                 "Key": {
@@ -233,17 +221,13 @@ def update_class_instructor(instructor: PatchInstructor, class_id: int, dynamodb
                 }
             }
         }
+        responses = dynamodb.transact_get_items([kwargs])
 
-        client = dynamodb.meta.client  # A low-level client
-        response = client.transact_get_items(TransactItems=[get_instructor_params])
-
-        query_results = response["Responses"]
-
-        if not query_results[0] or not "Instructor" in query_results[0]["Item"]["roles"]:
+        if not responses[0] or not "Instructor" in responses[0]["Item"]["roles"]:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                                 detail="instructor information not found")
 
-        update_instructor_params = {
+        update_kwargs = {
             "Key": {
                 "id": class_id
             },
@@ -252,8 +236,8 @@ def update_class_instructor(instructor: PatchInstructor, class_id: int, dynamodb
             "UpdateExpression": "SET #instructor_id = :v1, #instructor_first_name = :v2, #instructor_last_name = :v3",
             "ExpressionAttributeValues": {
                 ":v1": instructor.cwid,
-                ":v2": query_results[0]["Item"]["first_name"],
-                ":v3": query_results[0]["Item"]["last_name"]
+                ":v2": responses[0]["Item"]["first_name"],
+                ":v3": responses[0]["Item"]["last_name"]
             },
             "ExpressionAttributeNames": {
                 "#instructor_id": "instructor_id",
@@ -263,9 +247,7 @@ def update_class_instructor(instructor: PatchInstructor, class_id: int, dynamodb
             "ReturnValues": "UPDATED_NEW"
         }
 
-        dynamodb.Table(TableNames.CLASSES).update_item(**update_instructor_params)
-        return JSONResponse(status_code=HTTPStatus.OK, content={"message": "updated instructor for class successfully"})
-
+        dynamodb.update_item(TableNames.CLASSES, update_kwargs)
     except ClientError as e:
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             raise HTTPException(
@@ -277,3 +259,5 @@ def update_class_instructor(instructor: PatchInstructor, class_id: int, dynamodb
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
+    else:
+        return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Item updated successfully"})
