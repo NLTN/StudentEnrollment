@@ -126,6 +126,9 @@ def create_class(new_class: ClassCreate, dynamodb: DynamoClient = Depends(get_dy
     }
 
     try:
+        # ---------------------------------------------------------------------
+        # Check if course & instructor exists
+        # ---------------------------------------------------------------------
         responses = dynamodb.transact_get_items(
             [get_course_kwargs, get_instructor_kwargs])
 
@@ -136,11 +139,21 @@ def create_class(new_class: ClassCreate, dynamodb: DynamoClient = Depends(get_dy
         if not responses[1] or not "Instructor" in responses[1]["Item"]["roles"]:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                                 detail="Instructor not found")
-        data = {
-            "Item": dict(new_class),
+
+        # ---------------------------------------------------------------------
+        # Insert into DB
+        # ---------------------------------------------------------------------
+        item = dict(new_class)  # Convert to dictionary
+        # Append new attribute `term`
+        item["available_status"] = "true"
+
+        kwargs = {
+            "Item": item,
             "ConditionExpression": "attribute_not_exists(id)"
         }
-        dynamodb.put_item(TableNames.CLASSES, data)
+
+        dynamodb.put_item(TableNames.CLASSES, kwargs)
+
     except ClientError as e:
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             raise HTTPException(status_code=HTTPStatus.CONFLICT,

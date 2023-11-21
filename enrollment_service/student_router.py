@@ -4,6 +4,7 @@ from http import HTTPStatus
 from fastapi.responses import JSONResponse
 from fastapi import Depends, HTTPException, Header, Body, status, APIRouter, Request
 from datetime import datetime
+from redis import Redis, RedisError
 from .dynamoclient import DynamoClient
 from .db_connection import get_db, get_redisdb, get_dynamodb, TableNames
 from .enrollment_helper import enroll_students_from_waitlist, is_auto_enroll_enabled
@@ -18,59 +19,26 @@ student_router = APIRouter()
 
 
 @student_router.get("/classes/available/", dependencies=[Depends(get_or_create_user)])
-def get_available_classes(db: Any = Depends(get_dynamo), user: Personnel = Depends(get_current_user)):
-    '''
-    EXAMPLE ONLY (please reimplement this endpoint)
-    requirements:
-        - "x-cwid", "x-first-name", "x-last-name", "x-roles" headers from krakend must be propagated
+def get_available_classes(dynamodb: DynamoClient = Depends(get_dynamodb)):
+    try:
+        # ---------------------------------------------------------------------
+        # Get the information of the class
+        # ---------------------------------------------------------------------
+        get_class_params = {
+            "IndexName": "available_status-index",
+            "KeyConditionExpression": "available_status = :value",
+            "ExpressionAttributeValues": {":value": "true"},
+        }
+        responses = dynamodb.query(TableNames.CLASSES, get_class_params)
+        response_json = responses["Items"]
 
-    example of dependency injection usage:
-        1: "dependencies = [get_or_create_user]" -> this function retrieves or create user information based on 
-            the propagated headers. (syncs with user db). user info is stored in request state
-        2: get_dynamo -> abstraction to make dynamo accesible within the endpoint. the dynamo wrapper instance was 
-            instantiated in app.py and already stored in the app state. this function just returns the object
-
-            **why are we reusing the same instance of dynamo wrapper?
-              - botocore has a built in db connection pool, of default 10 connections. that's why we only
-                need one instance for the dynamo wrapper
-
-        3: get_current_user -> abstraction to make current user accessible within the endpoint. this function just returns
-            the user object saved in request state from get_or_create_user 
-    '''
-    return {"user": user.cwid}
-# def get_available_classes(db: sqlite3.Connection = Depends(get_db),  student_id: int = Header(
-#         alias="x-cwid", description="A unique ID for students, instructors, and registrars")):
-#     """
-#     Retreive all available classes.
-
-#     Returns:
-#     - dict: A dictionary containing the details of the classes
-#     """
-#     print(student_id)
-#     try:
-#         classes = db.execute(
-#             """
-#             SELECT c.*
-#             FROM "class" as c
-#             WHERE datetime('now') BETWEEN c.enrollment_start AND c.enrollment_end
-#                 AND (
-#                         (c.room_capacity >
-#                             (SELECT COUNT(enrollment.student_id)
-#                             FROM enrollment
-#                             WHERE class_id=c.id) > 0)
-#                         OR ((SELECT COUNT(waitlist.student_id)
-#                             FROM waitlist
-#                             WHERE class_id=c.id) < ?)
-#                     );
-#             """, [WAITLIST_CAPACITY]
-#         )
-#     except sqlite3.Error as e:
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail={"type": type(e).__name__, "msg": str(e)},
-#         )
-#     finally:
-#         return {"classes": classes.fetchall()}
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=e)
+    else:
+        return response_json
 
 
 @student_router.post("/enrollment/", dependencies=[Depends(get_or_create_user)], status_code=status.HTTP_201_CREATED)
@@ -79,7 +47,7 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
                alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
            first_name: str = Header(alias="x-first-name"),
            last_name: str = Header(alias="x-last-name"),
-           redisdb=Depends(get_redisdb),
+           redisdb: Redis = Depends(get_redisdb),
            dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Student enrolls in a class
@@ -115,8 +83,8 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
         responses = dynamodb.transact_get_items([get_class_params])
 
         if not responses[0]:
-            raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND, detail="Class Not Found")
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                                detail="Class Not Found")
 
         class_info = ClassCreate(**responses[0]["Item"])
 
@@ -137,15 +105,41 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
         # If there is an open seat, enroll the student in the class
         # ---------------------------------------------------------------------
         if class_info.room_capacity > num_students_enrolled:
-            kwargs = {
-                "Item": {
-                    "class_id": class_id,
-                    "student_cwid": student_id
-                },
-                "ConditionExpression": "attribute_not_exists(class_id) AND attribute_not_exists(student_cwid)"
-            }
 
-            dynamodb.put_item(TableNames.ENROLLMENTS, kwargs)
+            # After student enrolled in the class,
+            # If there will be NO open seats (Class will be full),
+            # Then, set available status to "false".
+            # Otherwise, "true"
+            available_status = "true" if class_info.room_capacity > num_students_enrolled + 1 else "false"
+
+            TransactItems = [
+                {
+                    'Put': {
+                        'TableName': TableNames.ENROLLMENTS,
+                        "Item": {
+                            "class_id": class_id,
+                            "student_cwid": student_id
+                        },
+                        "ConditionExpression": "attribute_not_exists(class_id) AND attribute_not_exists(student_cwid)"
+                    }
+                },
+                {
+                    'Update': {
+                        'TableName': TableNames.CLASSES,
+                        'Key': {
+                            'id': class_id
+                        },
+                        'UpdateExpression': 'SET available_status = :new_value',
+                        'ExpressionAttributeValues': {
+                            ':new_value': available_status
+                        }
+                    }
+                }
+            ]
+
+            response = dynamodb.transact_write_items(TransactItems)
+            print(response)
+            # dynamodb.put_item(TableNames.ENROLLMENTS, kwargs)
 
             response_json = JSONResponse(status_code=HTTPStatus.CREATED, content={
                                          "detail": "Enrolled successfully"})
@@ -167,27 +161,29 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
                                     detail="The class & the waitlist is full")
 
     except ClientError as e:
-        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Item already exists")
+        if e.response["Error"]["Code"] == "TransactionCanceledException":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="Transaction Canceled")
+        elif e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="Already enrolled")
         else:
             raise Exception(e.response)
     except HTTPException as e:
         raise HTTPException(status_code=e.status_code, detail=str(e.detail))
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=e)
     else:
         return response_json
 
 
 @student_router.delete("/enrollment/{class_id}", status_code=status.HTTP_200_OK)
 def drop_class(
-    class_id: int,
-    student_id: int = Header(
-        alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
-    dynamodb: DynamoClient = Depends(get_dynamodb)
-):
+        class_id: int,
+        student_id: int = Header(
+            alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
+        dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Handles a DELETE request to drop a student (himself/herself) from a specific class.
 
@@ -240,8 +236,8 @@ def drop_class(
     except HTTPException as e:
         raise HTTPException(status_code=e.status_code, detail=str(e.detail))
     except Exception as e:
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="INTERNAL SERVER ERROR")
     else:
         return {"detail": "Item deleted successfully"}
 
@@ -251,50 +247,41 @@ def get_current_waitlist_position(
         class_id: int,
         student_id: int = Header(
             alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
-        db: sqlite3.Connection = Depends(get_db)):
+        redisdb: Redis = Depends(get_redisdb)):
     """
-    Retreive all available classes.
+    Retreive the position of the student on the waitlist.
 
     Returns:
-    - dict: A dictionary containing the details of the classes
+    - int: The position of the student on the waitlist
 
     Raises:
     - HTTPException (404): If record not found
     """
     try:
-        result = db.execute(
-            """
-            SELECT COUNT(student_id)
-            FROM waitlist
-            WHERE class_id=? AND 
-                waitlist_date <= (SELECT waitlist_date 
-                                    FROM waitlist
-                                    WHERE class_id=? AND 
-                                            student_id=?)
-            ;
-            """, [class_id, class_id, student_id]
-        ).fetchone()
+        # Get the rank of the member in the sorted set
+        rank = redisdb.zrank(class_id, student_id)
 
-        if result[0] == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Record Not Found"
-            )
-        return {"position": result[0]}
-
-    except sqlite3.Error as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
+        if rank is not None:
+            response_json = {"position": rank + 1}
+        else:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                                detail="Record Not Found")
+    except RedisError as e:
+        print(f"RedisError: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+    else:
+        return response_json
+    finally:
+        redisdb.close()  # Close the Redis connection
 
 
 @student_router.delete("/waitlist/{class_id}/", status_code=status.HTTP_200_OK)
 def remove_from_waitlist(
-    class_id: int,
-    student_id: int = Header(
-        alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
-    db: sqlite3.Connection = Depends(get_db)
-):
+        class_id: int,
+        student_id: int = Header(
+            alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
+        redisdb: Redis = Depends(get_redisdb)):
     """
     Students remove themselves from waitlist
 
@@ -309,18 +296,19 @@ def remove_from_waitlist(
     - HTTPException (409): If a conflict occurs
     """
     try:
-        curr = db.execute(
-            "DELETE FROM waitlist WHERE class_id=? AND student_id=?", [class_id, student_id])
+        # Get the rank of the member in the sorted set
+        deleted_count = redisdb.zrem(class_id, student_id)
 
-        if curr.rowcount == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Record Not Found"
-            )
-
-    except sqlite3.IntegrityError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
-
-    return {"detail": "Item deleted successfully"}
+        if deleted_count > 0:
+            response_json = {"detail": "Item deleted successfully"}
+        else:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                                detail="Record Not Found")
+    except RedisError as e:
+        print(f"RedisError: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+    else:
+        return response_json
+    finally:
+        redisdb.close()  # Close the Redis connection

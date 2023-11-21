@@ -13,18 +13,27 @@ class ClassTest(unittest.TestCase):
         unittest_tearDown()
 
     def test_get_available_class(self):
+        # ------------------ Registrar ------------------
         # Register & Login
-        user_register(2, "abc@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        access_token = user_login("abc@csu.fullerton.edu", password="1234")
+        user_register(881234, "john@fullerton.edu", "1234", "john",
+                      "smith", ["Registrar"])
+        registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
+        # Create a class for testing
+        class_id = 99999
+        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
+
+        # ------------------ Student ------------------
+        # Register & Login
+        user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
+                      "nguyen", ["Student"])
+        student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
+
+        # ------------------ CALL API ------------------
         # Prepare header & message body
         headers = {
             "Content-Type": "application/json;",
-            "Authorization": f"Bearer {access_token}"
-        }
-        body = {
-            "enabled": True
+            "Authorization": f"Bearer {student_access_token}"
         }
 
         # Send request
@@ -33,7 +42,7 @@ class ClassTest(unittest.TestCase):
 
         # Assert
         self.assertEqual(response.status_code, 200)
-        self.assertIn("classes", response.json())
+        self.assertEqual(len(response.json()), 1)
 
 class EnrollmentTest(unittest.TestCase):
     def setUp(self):
@@ -153,16 +162,15 @@ class DropClassTest(unittest.TestCase):
         unittest_tearDown()
 
     def test_drop_class(self):
-        # ------------------ Registrar ------------------
+       # ------------------ Registrar ------------------
         # Register & Login
         user_register(881234, "john@fullerton.edu", "1234", "john",
                       "smith", ["Registrar"])
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10,
-                                "2023-06-12", "2023-06-01 09:00:00", "2024-06-15 17:00:00", registrar_access_token)
-        class_id = response.json()["inserted_id"]
+        class_id = 99999
+        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
 
         # ------------------ Student ------------------
         # Register & Login
@@ -174,7 +182,7 @@ class DropClassTest(unittest.TestCase):
         response = enroll_class(class_id, student_access_token)
         
         # Assert
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 201)
 
         # ------------- DROP CLASS --------
 
@@ -225,11 +233,10 @@ class WaitlistTest(unittest.TestCase):
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        response = create_class("SOC", 301, 2, 2024, "FA", 1, 1,
-                                "2023-06-12", "2023-06-01 09:00:00", "2024-06-15 17:00:00", registrar_access_token)
-        class_id = response.json()["inserted_id"]
+        class_id = 99999
+        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
 
-        # ------------------ Student #1------------------
+        # ------------------ Student 01: Enroll Success ------------------
         # Register & Login
         user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
                       "nguyen", ["Student"])
@@ -238,15 +245,20 @@ class WaitlistTest(unittest.TestCase):
         # Enroll 
         response = enroll_class(class_id, student_access_token)
         
-        # ------------------ Student #2------------------
+        # Assert
+        self.assertEqual(response.status_code, 201)
+
+        # ------------------ Student 02: Placed on Waitlist ------------------
         # Register & Login
-        user_register(9991235, "abc2@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student", "Instructor"])
+        student_id = 88812801
+        user_register(student_id, "abc2@csu.fullerton.edu", "1234", "nathan",
+                      "nguyen", ["Student"])
         student_access_token = user_login("abc2@csu.fullerton.edu", password="1234")
 
         # Enroll 
         response = enroll_class(class_id, student_access_token)
-        
+
+        # ------------------ CALL API ------------------
         # Prepare header & message body
         headers = {
             "Content-Type": "application/json;",
@@ -259,6 +271,7 @@ class WaitlistTest(unittest.TestCase):
 
         # Assert
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["position"], 1)
 
     def test_remove_from_waitlist(self):
         # ------------------ Registrar ------------------
@@ -268,11 +281,10 @@ class WaitlistTest(unittest.TestCase):
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        response = create_class("SOC", 301, 2, 2024, "FA", 1, 1,
-                                "2023-06-12", "2023-06-01 09:00:00", "2024-06-15 17:00:00", registrar_access_token)
-        class_id = response.json()["inserted_id"]
+        class_id = 99999
+        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
 
-        # ------------------ Student #1------------------
+        # ------------------ Student 01: Enroll Success ------------------
         # Register & Login
         user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
                       "nguyen", ["Student"])
@@ -281,15 +293,20 @@ class WaitlistTest(unittest.TestCase):
         # Enroll 
         response = enroll_class(class_id, student_access_token)
         
-        # ------------------ Student #2------------------
+        # Assert
+        self.assertEqual(response.status_code, 201)
+
+        # ------------------ Student 02: Placed on Waitlist ------------------
         # Register & Login
-        user_register(9991235, "abc2@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student", "Instructor"])
+        student_id = 88812801
+        user_register(student_id, "abc2@csu.fullerton.edu", "1234", "nathan",
+                      "nguyen", ["Student"])
         student_access_token = user_login("abc2@csu.fullerton.edu", password="1234")
 
         # Enroll 
         response = enroll_class(class_id, student_access_token)
-        
+
+        # ------------------ CALL API ------------------
         # Prepare header & message body
         headers = {
             "Content-Type": "application/json;",

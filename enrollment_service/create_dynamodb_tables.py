@@ -17,9 +17,28 @@ create_class_table_params = {
         {
             "AttributeName": "id",
             "AttributeType": "N"
+        },
+        {
+            "AttributeName": "available_status",
+            "AttributeType": "S"
         }
     ],
     "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3},
+    "GlobalSecondaryIndexes": [
+        {
+            "IndexName": "available_status-index",
+            "KeySchema": [
+                { "AttributeName": "available_status", "KeyType": "HASH" }
+            ],
+            "Projection": {
+                "ProjectionType": "ALL"
+            },
+            "ProvisionedThroughput": {
+                "ReadCapacityUnits": 3,
+                "WriteCapacityUnits": 3
+            }
+        }
+    ]
 }
 
 create_course_table_params = {
@@ -101,28 +120,9 @@ create_enrollment_table_params = {
         {
             "AttributeName": "student_cwid",
             "AttributeType": "N"
-        },
-        {
-            "AttributeName": "term",
-            "AttributeType": "S"
         }
     ],
-    "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3},
-    "GlobalSecondaryIndexes": [
-        {
-            "IndexName": "term-index",
-            "KeySchema": [
-                { "AttributeName": "term", "KeyType": "HASH" }
-            ],
-            "Projection": {
-                "ProjectionType": "ALL"
-            },
-            "ProvisionedThroughput": {
-                "ReadCapacityUnits": 3,
-                "WriteCapacityUnits": 3
-            }
-        }
-    ]
+    "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3}
 }
 
 create_droplist_table_params = {
