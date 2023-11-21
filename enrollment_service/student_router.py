@@ -77,15 +77,15 @@ def enroll(class_term_slug: str, db: Any = Depends(get_dynamo), db_redis: Any = 
     Student enrolls in a class
 
     Parameters:
-    - class_id (int, in the request body): The unique identifier of the class where students will be enrolled.
-    - student_id (int, in the request header): The unique identifier of the student who is enrolling.
+    - class_term_slug (string, parameter): The unique identifier (term_class) of the class where students will be enrolled.    
 
     Returns:
-    - HTTP_200_OK on success
+    - HTTP_201_CREATED on success
 
     Raises:
     - HTTPException (400): If there are no available seats.
     - HTTPException (404): If the specified class does not exist.
+    - HTTPException (403): If student participates in more than 3 waitlists.
     - HTTPException (409): If a conflict occurs (e.g., The student has already enrolled into the class).
     - HTTPException (500): If there is an internal server error.
     """
@@ -117,12 +117,22 @@ def enroll(class_term_slug: str, db: Any = Depends(get_dynamo), db_redis: Any = 
         }
     }
 
+    get_waitlist_participation_params = {
+        "Get" : {
+            "TableName" : DYNAMO_TABLENAMES["waitlist_participation"],
+            "Key" : {
+                "cwid" : user.cwid,
+                "term" : term
+            }
+        }
+    }
+
     get_class_enrollment_params = {
         "IndexName": "class_enrollment",
         "KeyConditionExpression" : Key("term").eq(term) & Key("class").eq(_class)
     }
     
-    query_results = db.transact_get_items(transact_items=[get_class_params, get_student_enrollment_params])
+    query_results = db.transact_get_items(transact_items=[get_class_params, get_student_enrollment_params, get_waitlist_participation_params])
 
     if not query_results[0]:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="class information not found")
@@ -134,15 +144,39 @@ def enroll(class_term_slug: str, db: Any = Depends(get_dynamo), db_redis: Any = 
     class_enrollment_count = len(db.query(tablename="Enrollment", query_params=get_class_enrollment_params))
 
     if class_enrollment_count < query_results[0]["Item"]["room_capacity"]:
-        item = {
-            "term" : term,
-            "enrollment_slug" : f'{_class}-{user.cwid}',
-            "student_cwid" : user.cwid,
-            "class" : _class,
+        
+        new_enrollment_params = {
+            "Put" : {
+                "TableName" : DYNAMO_TABLENAMES["enrollment"],
+                "Item" : {
+                    "term" : term,
+                    "enrollment_slug" : f'{_class}-{user.cwid}',
+                    "student_cwid": user.cwid,
+                    "class" : _class
+                }
+            }
         }
 
-        if db.put_item(tablename=DYNAMO_TABLENAMES["enrollment"], item=item):
+        update_enrollment_count_params = {
+            "Update" : {
+                "TableName" : DYNAMO_TABLENAMES["class"],
+                "Key" : {
+                            "term" : term,
+                            "class" : _class
+                        },
+                "UpdateExpression" : 'SET #enrollment_count = #enrollment_count + :val' ,
+                "ExpressionAttributeValues": {
+                    ":val" : 1           
+                },
+                "ExpressionAttributeNames": {
+                    "#enrollment_count" : "enrollment_count",            
+                }                            
+            }
+        }
+
+        if db.transact_write_items(transact_items=[new_enrollment_params, update_enrollment_count_params]):        
             return JSONResponse(status_code=HTTPStatus.CREATED, content={"message": f'Enrolled in {_class}({term}) successfully'})
+
 
 
     set_name = f'{_class}-{term}'
@@ -151,14 +185,35 @@ def enroll(class_term_slug: str, db: Any = Depends(get_dynamo), db_redis: Any = 
     if is_student_waitlisted:
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="You are currently waitlisted for this class")
     
+    if query_results[2] and query_results[2]["Item"]["count"] >= MAX_NUMBER_OF_WAITLISTS_PER_STUDENT:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=f'you cannot participate in more than {MAX_NUMBER_OF_WAITLISTS_PER_STUDENT} waitlists')
 
     waitlist_size = db_redis.zcard(set_name)
 
     if waitlist_size < WAITLIST_CAPACITY:
-        db_redis.zadd(set_name, {user.cwid : round(time.time() * 1000)})
-        return JSONResponse(status_code=HTTPStatus.CREATED, content={"detail" : f'You are currently placed {waitlist_size+1}/{WAITLIST_CAPACITY} on the waitlist'})
 
-    
+        update_waitlist_participation_params = {
+            "Update" : {"Key" : {
+                            "cwid" : user.cwid,
+                            "term" : term
+                        },
+                        "UpdateExpression" : 'SET #count = #count + :val' ,
+                        "ExpressionAttributeValues": {
+                            ":val" : 1           
+                        },
+                        "ExpressionAttributeNames": {
+                            "#count" : "count",            
+                        },                                
+                    }
+        }
+
+        
+        if db.update_item(tablename=DYNAMO_TABLENAMES["waitlist_participation"], update_params=update_params):
+            db_redis.zadd(set_name, {user.cwid : round(time.time() * 1000)})
+
+            return JSONResponse(status_code=HTTPStatus.CREATED, content={"detail" : f'You are currently placed {waitlist_size+1}/{WAITLIST_CAPACITY} on the waitlist'})
+
+    return HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="class is full")
 
 
     
