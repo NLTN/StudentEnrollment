@@ -1,5 +1,6 @@
 import sqlite3
 from fastapi import HTTPException, status
+from .db_connection import get_dynamodb, get_redisdb, TableNames
 
 def is_auto_enroll_enabled(db: sqlite3.Connection):
     """
@@ -94,3 +95,31 @@ def enroll_students_from_waitlist(db: sqlite3.Connection, class_id_list: list[in
         )
     
     return enrollment_count
+
+
+def add_to_waitlist(class_id, student_id, member_name: str, score: int):
+    try:
+        redisdb = get_redisdb()
+        dynamodb = get_dynamodb()
+
+        # Insert into Redis DB
+        redisdb.zadd(class_id, {member_name: score})
+
+        # Update Personnel table: add class_id to waitlist attribute
+        update_kwargs = {
+            "Key": {
+                "cwid": student_id
+            },
+            "ConditionExpression": "attribute_exists(cwid)",
+            "UpdateExpression": "SET waitlists = list_append(if_not_exists(waitlists, :empty_list), :new_item)",
+            "ExpressionAttributeValues": {
+                ":new_item": [class_id],
+                ':empty_list': []
+            },
+            "ReturnValues": "UPDATED_NEW"
+        }
+
+        dynamodb.update_item(TableNames.PERSONNEL, update_kwargs)
+
+    except Exception as e:
+        raise Exception(f"AddToWaitlistFailed: {e}")

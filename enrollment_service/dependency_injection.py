@@ -1,35 +1,44 @@
-from .models import Personnel
-from boto3.dynamodb.conditions import Key
-from fastapi import Request
+from fastapi import Header, Depends
+from .dynamoclient import DynamoClient
+from .db_connection import get_dynamodb, TableNames
 
-def get_or_create_user(request: Request):    
-    personnel_obj = {
-        "cwid" : int(request.headers["x-cwid"]),
-        "first_name" : request.headers["x-first-name"],
-        "last_name" : request.headers["x-last-name"],
-        "roles" : request.headers["x-roles"].split(",")
-    }
 
-    personnel = Personnel(**personnel_obj)
+def sync_user_account(
+        cwid: int = Header(alias="x-cwid"),
+        first_name: str = Header(alias="x-first-name"),
+        last_name: str = Header(alias="x-last-name"),
+        roles: str = Header(alias="x-roles"),
+        dynamodb: DynamoClient = Depends(get_dynamodb)):
+    """
+    Synchronizes user account information to a DynamoDB table.
 
-    query_params = {
-        "KeyConditionExpression" : Key("cwid").eq(personnel.cwid)
-    }
-    
-    get_personnel = request.app.state.dynamo.query("Personnel", query_params)
-    
-    if not get_personnel:
+    Parameters:
+    - cwid (int): The user's unique identifier.
+    - first_name (str): The user's first name.
+    - last_name (str): The user's last name.
+    - roles (str): A comma-separated string of user roles.
+    - dynamodb (DynamoClient): DynamoDB client used to interact with the database.
+
+    Raises:
+    - Exception: Any unexpected error during the process.
+
+    Example:
+    ```python
+    @registrar_router.post("/classes/", dependencies=[Depends(sync_user_account)])
+    ```
+
+    Note:
+    This function is designed to be used as a FastAPI dependency in web applications.
+    """
+    try:
         kwargs = {
-            "Item": personnel_obj
+            "Item": {
+                "cwid": cwid,
+                "first_name": first_name,
+                "last_name": last_name,
+                "roles": roles.split(",")
+            }
         }
-        request.app.state.dynamo.put_item("Personnel", kwargs)
-   
-    request.app.state.current_user = personnel
-
-def get_current_user(request: Request):
-    return request.app.state.current_user
-
-def get_dynamo(request: Request):
-    return request.app.state.dynamo
-
-
+        dynamodb.put_item(TableNames.PERSONNEL, kwargs)
+    except Exception as e:
+        raise Exception(f"UserAccountSyncFailed: {e}")

@@ -3,13 +3,13 @@ from http import HTTPStatus
 from fastapi import Depends, HTTPException, Header, Body, status, APIRouter, Request
 from fastapi.responses import JSONResponse
 from botocore.exceptions import ClientError
-from datetime import datetime
 from redis import Redis, RedisError
 from .dynamoclient import DynamoClient
-from .db_connection import get_db, get_redisdb, get_dynamodb, TableNames
-from .enrollment_helper import enroll_students_from_waitlist, is_auto_enroll_enabled
-from .dependency_injection import *
+from .db_connection import get_redisdb, get_dynamodb, TableNames
+from .enrollment_helper import add_to_waitlist, enroll_students_from_waitlist, is_auto_enroll_enabled
+from .dependency_injection import sync_user_account
 from .models import ClassCreate
+from datetime import datetime
 
 WAITLIST_CAPACITY = 15
 MAX_NUMBER_OF_WAITLISTS_PER_STUDENT = 3
@@ -17,7 +17,7 @@ MAX_NUMBER_OF_WAITLISTS_PER_STUDENT = 3
 student_router = APIRouter()
 
 
-@student_router.get("/classes/available/", dependencies=[Depends(get_or_create_user)])
+@student_router.get("/classes/available/", dependencies=[Depends(sync_user_account)])
 def get_available_classes(dynamodb: DynamoClient = Depends(get_dynamodb)):
     try:
         # ---------------------------------------------------------------------
@@ -40,7 +40,7 @@ def get_available_classes(dynamodb: DynamoClient = Depends(get_dynamodb)):
         return response_json
 
 
-@student_router.post("/enrollment/", dependencies=[Depends(get_or_create_user)], status_code=status.HTTP_201_CREATED)
+@student_router.post("/enrollment/", dependencies=[Depends(sync_user_account)], status_code=status.HTTP_201_CREATED)
 def enroll(class_id: Annotated[str, Body(embed=True)],
            student_id: int = Header(
                alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
@@ -61,8 +61,9 @@ def enroll(class_id: Annotated[str, Body(embed=True)],
     Raises:
     - HTTPException (400): If there are no available seats.
     - HTTPException (404): If the specified class does not exist.
-    - HTTPException (409): If a conflict occurs (e.g., The student has already enrolled into the class).
+    - HTTPException (409): If a conflict occurs (e.g., The student has already enrolled into the class or the student is already on the waitlist).
     - HTTPException (500): If there is an internal server error.
+    - HTTPException (503): If the waitlist is full. Unable to accept new entries at this time.
     """
     try:
         # API Response data
@@ -146,26 +147,39 @@ def enroll(class_id: Annotated[str, Body(embed=True)],
                                          "detail": "Enrolled successfully"})
 
         # ---------------------------------------------------------------------
-        # Else If the waitlist is not full, add the student to the waitlist
+        # Else, Check & Add the student to the waitlist
         # ---------------------------------------------------------------------
         else:
+            # Generate redis sorted set member name
+            new_member = f"{student_id}#{first_name}#{last_name}"
+
+            # ***********************************************
+            # Check if the student is already on the waitlist
+            # ***********************************************
+            rank = redisdb.zrank(class_id, new_member)
+
+            if rank is not None:
+                raise HTTPException(status_code=HTTPStatus.CONFLICT,
+                                    detail="Already on the waitlist")
+
+            # ***********************************************
+            # Check waitlist capacity
+            # ***********************************************
             num_students_on_waitlist = redisdb.zcard(class_id)
 
-            if num_students_on_waitlist < WAITLIST_CAPACITY:
-                current_timestamp = int(datetime.utcnow().timestamp())
+            if num_students_on_waitlist >= WAITLIST_CAPACITY:
+                raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                                    detail="Waitlist is full")
 
-                # Generate a sorted set member 
-                new_member = f"{student_id}#{first_name}#{last_name}"
+            # ***********************************************
+            # OK. Checks passed. Place the student on waitlist
+            # ***********************************************
+            score = int(datetime.utcnow().timestamp())
+            add_to_waitlist(class_id, student_id, new_member, score)
 
-                # Insert into Redis DB
-                redisdb.zadd(class_id, {new_member: current_timestamp})
-
-                # Return value
-                response_json = JSONResponse(status_code=HTTPStatus.CREATED,
-                                             content={"detail": "Placed on waitlist"})
-            else:
-                raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
-                                    detail="The class & the waitlist is full")
+            # Return value
+            response_json = JSONResponse(status_code=HTTPStatus.CREATED,
+                                         content={"detail": "Successfully placed on the waitlist"})
 
     except ClientError as e:
         if e.response["Error"]["Code"] == "TransactionCanceledException":
@@ -183,6 +197,8 @@ def enroll(class_id: Annotated[str, Body(embed=True)],
                             detail=e)
     else:
         return response_json
+    finally:
+        redisdb.close()  # Close the Redis connection
 
 
 @student_router.delete("/enrollment/{class_id}", status_code=status.HTTP_200_OK)

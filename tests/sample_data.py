@@ -1,7 +1,8 @@
 from db_connection import get_dynamodb, TableNames
 
+
 def insert_courses():
-    table_name = "Course"
+    table_name = TableNames.COURSES
     sample_data = [
         {"department_code": "CPSC", "course_no": 999, "title": "TEST 999"},
         {"department_code": "SOC", "course_no": 301, "title": "TEST 301"},
@@ -14,7 +15,7 @@ def insert_courses():
     print(f"Table {table_name}: {len(sample_data)} items")
 
 def insert_personel():
-    table_name = "Personnel"
+    table_name = TableNames.PERSONNEL
     sample_data = [
         {"cwid": 1, "first_name": "John", "last_name": "Smith", "roles": ["Instructor", "Registrar"]},
         {"cwid": 2, "first_name": "Mary", "last_name": "Brown", "roles": ["Instructor"]},

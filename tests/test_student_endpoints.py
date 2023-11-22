@@ -113,7 +113,7 @@ class EnrollmentTest(unittest.TestCase):
         # Assert
         self.assertEqual(response.status_code, 404)
 
-    def test_enroll_full_class_then_placed_on_waitlist(self):
+    def test_place_on_waitlist(self):
         # ------------------ Registrar ------------------
         # Register & Login
         user_register(881234, "john@fullerton.edu", "1234", "john",
@@ -155,7 +155,45 @@ class EnrollmentTest(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertIsNotNone(rank)
 
+    def test_already_on_waitlist(self):
+        # ------------------ Registrar ------------------
+        # Register & Login
+        user_register(881234, "john@fullerton.edu", "1234", "john",
+                      "smith", ["Registrar"])
+        registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
+        # Create a class for testing
+        response = create_class("SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
+
+        class_id = response.json()["inserted_id"]
+
+        # ------------------ Student 01: Enroll Success ------------------
+        # Register & Login
+        user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
+                      "nguyen", ["Student"])
+        student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
+
+        # Enroll 
+        response = enroll_class(class_id, student_access_token)
+        
+        # Assert
+        self.assertEqual(response.status_code, 201)
+
+        # ------------------ Student 02: Placed on Waitlist ------------------
+        # Register & Login
+        student_id = 88812801
+        user_register(student_id, "abc2@csu.fullerton.edu", "1234", "nathan",
+                      "nguyen", ["Student"])
+        student_access_token = user_login("abc2@csu.fullerton.edu", password="1234")
+
+        # Enroll 
+        response = enroll_class(class_id, student_access_token)
+        
+        # Enroll 
+        response = enroll_class(class_id, student_access_token)
+
+        # Assert
+        self.assertEqual(response.status_code, 409)
 class DropClassTest(unittest.TestCase):
     def setUp(self):
         unittest_setUp()

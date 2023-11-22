@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from botocore.exceptions import ClientError
 from .dynamoclient import DynamoClient
 from .db_connection import get_dynamodb, TableNames
-from .dependency_injection import get_or_create_user
+from .dependency_injection import sync_user_account
 from .models import Course, ClassCreate, ClassPatch, Config
 
 registrar_router = APIRouter()
@@ -80,7 +80,7 @@ def create_course(course: Course, dynamodb: DynamoClient = Depends(get_dynamodb)
         return JSONResponse(status_code=HTTPStatus.CREATED, content={"message": "Item created successfully"})
 
 
-@registrar_router.post("/classes/",  dependencies=[Depends(get_or_create_user)])
+@registrar_router.post("/classes/", dependencies=[Depends(sync_user_account)])
 def create_class(new_class: ClassCreate, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Creates a new class.
@@ -218,7 +218,7 @@ def delete_class(class_id: str, dynamodb: DynamoClient = Depends(get_dynamodb)):
         return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Item deleted successfully"})
 
 
-@registrar_router.patch("/classes/{class_id}", dependencies=[Depends(get_or_create_user)])
+@registrar_router.patch("/classes/{class_id}", dependencies=[Depends(sync_user_account)])
 def update_class_instructor(class_info: ClassPatch, class_id: str, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Updates instructor information for a class.
