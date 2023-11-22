@@ -202,7 +202,7 @@ class DropClassTest(unittest.TestCase):
         unittest_tearDown()
 
     def test_drop_class(self):
-       # ------------------ Registrar ------------------
+        # ------------------ Registrar ------------------
         # Register & Login
         user_register(881234, "john@fullerton.edu", "1234", "john",
                       "smith", ["Registrar"])

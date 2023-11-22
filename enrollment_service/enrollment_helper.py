@@ -1,5 +1,8 @@
 import sqlite3
+from http import HTTPStatus
 from fastapi import HTTPException, status
+from botocore.exceptions import ClientError
+from .dynamoclient import DynamoClient
 from .db_connection import get_dynamodb, get_redisdb, TableNames
 
 def is_auto_enroll_enabled(db: sqlite3.Connection):
@@ -123,3 +126,75 @@ def add_to_waitlist(class_id, student_id, member_name: str, score: int):
 
     except Exception as e:
         raise Exception(f"AddToWaitlistFailed: {e}")
+
+def drop_from_enrollment(class_id, student_id, administrative:bool, dynamodb: DynamoClient):
+    try:
+        TransactItems = [
+            {
+                # ---------------------------------------------------------------------
+                # DELETE FROM enrollment table
+                # ---------------------------------------------------------------------
+                "Delete": {
+                    "TableName": TableNames.ENROLLMENTS,
+                    "Key": {
+                        "class_id": class_id,
+                        "student_cwid": student_id
+                    },
+                    "ConditionExpression": "attribute_exists(class_id) AND attribute_exists(student_cwid)"
+                }
+            },
+            {
+                # ---------------------------------------------------------------------
+                # INSERT INTO droplist table
+                # ---------------------------------------------------------------------
+                "Put": {
+                    "TableName": TableNames.DROPLIST,
+                    "Item": {
+                        "class_id": class_id,
+                        "student_cwid": student_id,
+                        "administrative": administrative
+                    }
+                }
+            },
+            {
+                # ---------------------------------------------------------------------
+                # UPDATE Class available status
+                # ---------------------------------------------------------------------
+                "Update": {
+                    "TableName": TableNames.CLASSES,
+                    "Key": {
+                        "id": class_id
+                    },
+                    "UpdateExpression": "SET available = :new_value",
+                    "ExpressionAttributeValues": {
+                        ":new_value": "true"
+                    }
+                }
+            }
+        ]
+
+        dynamodb.transact_write_items(TransactItems)
+
+        # ---------------------------------------------------------------------
+        # Trigger auto enrollment
+        # ---------------------------------------------------------------------
+        # TODO: Call the function auto_enrollment_from_waitlist()
+
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "TransactionCanceledException":
+            cancellation_reasons = e.response["CancellationReasons"]
+            if cancellation_reasons[0]["Code"] == "ConditionalCheckFailed":
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                    detail="Transaction Canceled")
+            else:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                    detail="Conflict occurs")
+        else:
+            raise Exception(e.response)
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
+    except Exception as e:
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="INTERNAL SERVER ERROR")
+    else:
+        return {"detail": "Item deleted successfully"}

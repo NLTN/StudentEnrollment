@@ -6,7 +6,7 @@ from botocore.exceptions import ClientError
 from redis import Redis, RedisError
 from .dynamoclient import DynamoClient
 from .db_connection import get_redisdb, get_dynamodb, TableNames
-from .enrollment_helper import add_to_waitlist, enroll_students_from_waitlist, is_auto_enroll_enabled
+from .enrollment_helper import add_to_waitlist, drop_from_enrollment, enroll_students_from_waitlist, is_auto_enroll_enabled
 from .dependency_injection import sync_user_account
 from .models import ClassCreate
 from datetime import datetime
@@ -235,77 +235,8 @@ def drop_class(
     Raises:
     - HTTPException (409): If a conflict occurs
     """
-    try:
-        available = "true"
-
-        TransactItems = [
-            {
-                # ---------------------------------------------------------------------
-                # DELETE FROM enrollment table
-                # ---------------------------------------------------------------------
-                "Delete": {
-                    "TableName": TableNames.ENROLLMENTS,
-                    "Key": {
-                        "class_id": class_id,
-                        "student_cwid": student_id
-                    },
-                    "ConditionExpression": "attribute_exists(class_id) AND attribute_exists(student_cwid)"
-                }
-            },
-            {
-                # ---------------------------------------------------------------------
-                # INSERT INTO droplist table
-                # ---------------------------------------------------------------------
-                "Put": {
-                    "TableName": TableNames.DROPLIST,
-                    "Item": {
-                        "class_id": class_id,
-                        "student_cwid": student_id
-                    }
-                }
-            },
-            {
-                # ---------------------------------------------------------------------
-                # UPDATE Class available status
-                # ---------------------------------------------------------------------
-                "Update": {
-                    "TableName": TableNames.CLASSES,
-                    "Key": {
-                        "id": class_id
-                    },
-                    "UpdateExpression": "SET available = :new_value",
-                    "ExpressionAttributeValues": {
-                        ":new_value": available
-                    }
-                }
-            }
-        ]
-
-        dynamodb.transact_write_items(TransactItems)
-
-        # ---------------------------------------------------------------------
-        # Trigger auto enrollment
-        # ---------------------------------------------------------------------
-        # TODO: Call the function auto_enrollment_from_waitlist()
-
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "TransactionCanceledException":
-            cancellation_reasons = e.response["CancellationReasons"]
-            if cancellation_reasons[0]["Code"] == "ConditionalCheckFailed":
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                                    detail="Transaction Canceled")
-            else:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                                    detail="Conflict occurs")
-        else:
-            raise Exception(e.response)
-    except HTTPException as e:
-        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
-    except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                            detail="INTERNAL SERVER ERROR")
-    else:
-        return {"detail": "Item deleted successfully"}
+    administrative = False
+    drop_from_enrollment(class_id, student_id, administrative, dynamodb)
 
 
 @student_router.get("/waitlist/{class_id}/position/")
