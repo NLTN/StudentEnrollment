@@ -61,7 +61,10 @@ def enroll(class_id: Annotated[str, Body(embed=True)],
     Raises:
     - HTTPException (400): If there are no available seats.
     - HTTPException (404): If the specified class does not exist.
-    - HTTPException (409): If a conflict occurs (e.g., The student has already enrolled into the class or the student is already on the waitlist).
+    - HTTPException (409): If one of these conflicts occurs:
+      - The student already enrolled in the class.
+      - The student is already on the waitlist.
+      - Database conflicts.
     - HTTPException (500): If there is an internal server error.
     - HTTPException (503): If the waitlist is full. Unable to accept new entries at this time.
     """
@@ -150,7 +153,19 @@ def enroll(class_id: Annotated[str, Body(embed=True)],
         # Else, Check & Add the student to the waitlist
         # ---------------------------------------------------------------------
         else:
+            # ***********************************************
+            # Check number of waitlists limit per student
+            # ***********************************************
+            kwargs = {"Key": {"cwid": student_id}}
+            response = dynamodb.get_item(TableNames.PERSONNEL, kwargs)
+
+            if "waitlists" in response["Item"] and MAX_NUMBER_OF_WAITLISTS_PER_STUDENT <= len(response["Item"]["waitlists"]):
+                raise HTTPException(status_code=HTTPStatus.CONFLICT,
+                                    detail="Exceed number of waitlists limit")
+
+            # ***********************************************
             # Generate redis sorted set member name
+            # ***********************************************
             new_member = f"{student_id}#{first_name}#{last_name}"
 
             # ***********************************************
