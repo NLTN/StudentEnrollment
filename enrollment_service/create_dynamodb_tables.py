@@ -13,19 +13,19 @@ create_class_table_params = {
     "AttributeDefinitions": [
         {
             "AttributeName": "id",
-            "AttributeType": "N"
+            "AttributeType": "S"
         },
         {
-            "AttributeName": "available_status",
+            "AttributeName": "available",
             "AttributeType": "S"
         }
     ],
     "ProvisionedThroughput": {"ReadCapacityUnits": 3, "WriteCapacityUnits": 3},
     "GlobalSecondaryIndexes": [
         {
-            "IndexName": "available_status-index",
+            "IndexName": "available-index",
             "KeySchema": [
-                {"AttributeName": "available_status", "KeyType": "HASH"}
+                {"AttributeName": "available", "KeyType": "HASH"}
             ],
             "Projection": {
                 "ProjectionType": "ALL"
@@ -112,7 +112,7 @@ create_enrollment_table_params = {
     "AttributeDefinitions": [
         {
             "AttributeName": "class_id",
-            "AttributeType": "N"
+            "AttributeType": "S"
         },
         {
             "AttributeName": "student_cwid",
@@ -137,7 +137,7 @@ create_droplist_table_params = {
     "AttributeDefinitions": [
         {
             "AttributeName": "class_id",
-            "AttributeType": "N"
+            "AttributeType": "S"
         },
         {
             "AttributeName": "student_cwid",

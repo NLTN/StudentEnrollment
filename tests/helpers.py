@@ -65,7 +65,7 @@ def user_login(username, password):
     
     return None
 
-def create_class(id, dept_code, course_no, section_no, academic_year, semester,
+def create_class(dept_code, course_no, section_no, academic_year, semester,
                 instructor_id, room_capacity, access_token):
     # Prepare header & message body
     headers = {
@@ -73,13 +73,12 @@ def create_class(id, dept_code, course_no, section_no, academic_year, semester,
         "Authorization": f"Bearer {access_token}"
     }
     body = {
-        "id": id,
         "department_code": dept_code,
         "course_no": course_no,
         "section_no": section_no,
         "year": academic_year,
         "semester": semester,
-        "instructor_id": instructor_id,
+        "instructor_cwid": instructor_id,
         "room_capacity": room_capacity
     }
 

@@ -20,8 +20,7 @@ class ClassTest(unittest.TestCase):
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        class_id = 99999
-        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
+        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
 
         # ------------------ Student ------------------
         # Register & Login
@@ -59,8 +58,9 @@ class EnrollmentTest(unittest.TestCase):
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        class_id = 99999
-        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
+        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
+
+        class_id = response.json()["inserted_id"]
 
         # ------------------ Student ------------------
         # Register & Login
@@ -82,8 +82,9 @@ class EnrollmentTest(unittest.TestCase):
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        class_id = 99999
-        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
+        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
+
+        class_id = response.json()["inserted_id"]
 
         # ------------------ Student ------------------
         # Register & Login
@@ -107,7 +108,7 @@ class EnrollmentTest(unittest.TestCase):
         student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
         # Enroll 
-        response = enroll_class(111111, student_access_token)
+        response = enroll_class("111111", student_access_token)
         
         # Assert
         self.assertEqual(response.status_code, 404)
@@ -120,8 +121,9 @@ class EnrollmentTest(unittest.TestCase):
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        class_id = 99999
-        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
+        response = create_class("SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
+
+        class_id = response.json()["inserted_id"]
 
         # ------------------ Student 01: Enroll Success ------------------
         # Register & Login
@@ -147,7 +149,7 @@ class EnrollmentTest(unittest.TestCase):
 
         # Check if data inserted into Redis
         rdb = get_redisdb()
-        rank = rdb.zrank(class_id, student_id)
+        rank = rdb.zrange(class_id, 0, -1)
 
         # Assert
         self.assertEqual(response.status_code, 201)
@@ -169,8 +171,9 @@ class DropClassTest(unittest.TestCase):
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        class_id = 99999
-        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
+        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
+        
+        class_id = response.json()["inserted_id"]
 
         # ------------------ Student ------------------
         # Register & Login
@@ -233,8 +236,9 @@ class WaitlistTest(unittest.TestCase):
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        class_id = 99999
-        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
+        response = create_class("SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
+
+        class_id = response.json()["inserted_id"]
 
         # ------------------ Student 01: Enroll Success ------------------
         # Register & Login
@@ -281,8 +285,9 @@ class WaitlistTest(unittest.TestCase):
         registrar_access_token = user_login("john@fullerton.edu", password="1234")
 
         # Create a class for testing
-        class_id = 99999
-        response = create_class(class_id, "SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
+        response = create_class("SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
+
+        class_id = response.json()["inserted_id"]
 
         # ------------------ Student 01: Enroll Success ------------------
         # Register & Login

@@ -6,7 +6,7 @@ from botocore.exceptions import ClientError
 from .dynamoclient import DynamoClient
 from .db_connection import get_dynamodb, TableNames
 from .dependency_injection import get_or_create_user
-from .models import Course, ClassCreate, PatchInstructor, Config
+from .models import Course, ClassCreate, ClassPatch, Config
 
 registrar_router = APIRouter()
 
@@ -87,13 +87,12 @@ def create_class(new_class: ClassCreate, dynamodb: DynamoClient = Depends(get_dy
 
     Parameters:
     - `class` (ClassCreate): The JSON object representing the class with the following properties:
-        - `id` (int): Unique ID
         - `department_code` (str): Department code.
         - `course_no` (int): Course number.
         - `section_no` (int): Section number.
         - `year` (int): Academic year.
         - `semester` (str): Semester name (SP, SU, FA, WI).
-        - `instructor_id` (int): Instructor ID.
+        - `instructor_cwid` (int): Instructor ID.
         - `room_capacity` (int): Room capacity.
 
 
@@ -118,7 +117,7 @@ def create_class(new_class: ClassCreate, dynamodb: DynamoClient = Depends(get_dy
         "Get": {
             "TableName": TableNames.PERSONNEL,
             "Key": {
-                "cwid": new_class.instructor_id
+                "cwid": new_class.instructor_cwid
             }
         }
     }
@@ -137,16 +136,27 @@ def create_class(new_class: ClassCreate, dynamodb: DynamoClient = Depends(get_dy
         if not responses[1] or not "Instructor" in responses[1]["Item"]["roles"]:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                                 detail="Instructor not found")
-
+        
         # ---------------------------------------------------------------------
         # Insert into DB
         # ---------------------------------------------------------------------
-        item = dict(new_class)  # Convert to dictionary
-        # Append new attribute `term`
-        item["available_status"] = "true"
+        # Generate class_id. Example format: 2024.Fall.CPSC.335.2
+        new_class.id = f"{new_class.year}.{new_class.semester}.{new_class.department_code}.{new_class.section_no}"
+
+        # Convert to dictionary
+        record = dict(new_class)
+
+        # Add class name
+        record["title"] = responses[0]["Item"]["title"]
+
+        # Add instructor info
+        record["instructor_info"] = {
+            "first_name": responses[1]["Item"]["first_name"],
+            "last_name": responses[1]["Item"]["last_name"]
+        }
 
         kwargs = {
-            "Item": item,
+            "Item": record,
             "ConditionExpression": "attribute_not_exists(id)"
         }
 
@@ -164,11 +174,12 @@ def create_class(new_class: ClassCreate, dynamodb: DynamoClient = Depends(get_dy
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=e)
     else:
-        return JSONResponse(status_code=HTTPStatus.CREATED, content={"detail": "Item created successfully"})
+        return JSONResponse(status_code=HTTPStatus.CREATED,
+                            content={"inserted_id": new_class.id, "detail": "Item created successfully"})
 
 
 @registrar_router.delete("/classes/{class_id}")
-def delete_class(class_id: int, dynamodb: DynamoClient = Depends(get_dynamodb)):
+def delete_class(class_id: str, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Deletes a specific class.
 
@@ -208,13 +219,13 @@ def delete_class(class_id: int, dynamodb: DynamoClient = Depends(get_dynamodb)):
 
 
 @registrar_router.patch("/classes/{class_id}", dependencies=[Depends(get_or_create_user)])
-def update_class_instructor(instructor: PatchInstructor, class_id: int, dynamodb: DynamoClient = Depends(get_dynamodb)):
+def update_class_instructor(class_info: ClassPatch, class_id: str, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Updates instructor information for a class.
 
     Parameters:
-    - `instructor` (PatchInstructor): The JSON object representing the class with the following properties:
-        - `cwid` (int): Instructor ID.
+    - `class_info` (ClassPatch): The JSON object representing the class with the following properties:
+        - `instructor_cwid` (int): Instructor ID.
 
     Returns:
     - dict: A dictionary indicating the success of the update operation.
@@ -228,7 +239,7 @@ def update_class_instructor(instructor: PatchInstructor, class_id: int, dynamodb
             "Get": {
                 "TableName": TableNames.PERSONNEL,
                 "Key": {
-                    "cwid": instructor.cwid
+                    "cwid": class_info.instructor_cwid
                 }
             }
         }
@@ -246,7 +257,7 @@ def update_class_instructor(instructor: PatchInstructor, class_id: int, dynamodb
             "ConditionExpression": "attribute_exists(id)",
             "UpdateExpression": "SET #instructor_id = :v1, #instructor_first_name = :v2, #instructor_last_name = :v3",
             "ExpressionAttributeValues": {
-                ":v1": instructor.cwid,
+                ":v1": class_info.instructor_cwid,
                 ":v2": responses[0]["Item"]["first_name"],
                 ":v3": responses[0]["Item"]["last_name"]
             },

@@ -126,10 +126,13 @@ class CreateClassTest(unittest.TestCase):
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
         # Send request
-        response = create_class(99999, "SOC", 301, 2, 2024, "FA", 1, 10, access_token)
-
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10, access_token)
+        
+        class_id = response.json()["inserted_id"]
+        
         # Assert
         self.assertEqual(response.status_code, 201)
+        self.assertGreater(len(class_id), 0)
 
     def test_create_duplicate_class(self):
         # Register & Login
@@ -138,9 +141,8 @@ class CreateClassTest(unittest.TestCase):
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
         # Send request
-        response = create_class(99999, "SOC", "301", "2", 2024, "FA", 1, 10, access_token)
-
-        response = create_class(99999, "SOC", "301", "2", 2024, "FA", 1, 10, access_token)
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10, access_token)
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10, access_token)
 
         # Assert
         self.assertEqual(response.status_code, 409)
@@ -152,12 +154,13 @@ class CreateClassTest(unittest.TestCase):
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
         # Data
-        item_id = 99999
         old_instructor_id = 1
         new_instructor_id = 2
 
-        # Create a class        
-        response = create_class(item_id, "SOC", "301", "1", 2024, "FA", old_instructor_id, 10, access_token)
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", old_instructor_id, 10, access_token)
+        
+        class_id = response.json()["inserted_id"]
 
         # Prepare header & message body        
         headers = {
@@ -165,11 +168,11 @@ class CreateClassTest(unittest.TestCase):
             "Authorization": f"Bearer {access_token}"
         }
         body = {
-            "cwid": new_instructor_id
+            "instructor_cwid": new_instructor_id
         }
 
         # Send request
-        url = f'{BASE_URL}/api/classes/{item_id}'
+        url = f'{BASE_URL}/api/classes/{class_id}'
         response = requests.patch(url, headers=headers, json=body)
 
         # Assert
@@ -177,7 +180,7 @@ class CreateClassTest(unittest.TestCase):
 
         # Direct Access DB to check if data has been updated successfully
         query_params = {
-            "KeyConditionExpression": Key("id").eq(item_id)
+            "KeyConditionExpression": Key("id").eq(class_id)
         }
         dynamodb = get_dynamodb()
         response = dynamodb.Table(TableNames.CLASSES).query(**query_params)
@@ -205,7 +208,7 @@ class CreateClassTest(unittest.TestCase):
             "Authorization": f"Bearer {access_token}"
         }
         body = {
-            "cwid": new_instructor_id
+            "instructor_cwid": new_instructor_id
         }
 
         # Send request
@@ -221,12 +224,10 @@ class CreateClassTest(unittest.TestCase):
                       "nguyen", ["Student", "Registrar"])
         access_token = user_login("abc@csu.fullerton.edu", password="1234")
 
-        # Data
-        item_id = 99999
-        instructor_id = 1
-
         # Create a class
-        response = create_class(item_id, "SOC", "301", "1", 2024, "FA", instructor_id, 10, access_token)
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10, access_token)
+        
+        class_id = response.json()["inserted_id"]
 
         # Prepare header & message body        
         headers = {
@@ -235,14 +236,14 @@ class CreateClassTest(unittest.TestCase):
         }
 
         # Send request
-        url = f'{BASE_URL}/api/classes/{item_id}'
+        url = f'{BASE_URL}/api/classes/{class_id}'
         response = requests.delete(url, headers=headers)
         
         # Assert
         self.assertEqual(response.status_code, 200)
 
         # Direct Access DB to check if data has been updated successfully
-        query_params = {"KeyConditionExpression": Key("id").eq(item_id)}
+        query_params = {"KeyConditionExpression": Key("id").eq(class_id)}
         dynamodb = get_dynamodb()
         response = dynamodb.Table(TableNames.CLASSES).query(**query_params)
         items = response["Items"]

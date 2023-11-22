@@ -24,8 +24,8 @@ def get_available_classes(dynamodb: DynamoClient = Depends(get_dynamodb)):
         # Get the information of the class
         # ---------------------------------------------------------------------
         get_class_params = {
-            "IndexName": "available_status-index",
-            "KeyConditionExpression": "available_status = :value",
+            "IndexName": "available-index",
+            "KeyConditionExpression": "available = :value",
             "ExpressionAttributeValues": {":value": "true"},
         }
         responses = dynamodb.query(TableNames.CLASSES, get_class_params)
@@ -41,7 +41,7 @@ def get_available_classes(dynamodb: DynamoClient = Depends(get_dynamodb)):
 
 
 @student_router.post("/enrollment/", dependencies=[Depends(get_or_create_user)], status_code=status.HTTP_201_CREATED)
-def enroll(class_id: Annotated[int, Body(embed=True)],
+def enroll(class_id: Annotated[str, Body(embed=True)],
            student_id: int = Header(
                alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
            first_name: str = Header(alias="x-first-name"),
@@ -109,7 +109,7 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
             # If there will be NO open seats (Class will be full),
             # Then, set available status to "false".
             # Otherwise, "true"
-            available_status = "true" if class_info.room_capacity > num_students_enrolled + 1 else "false"
+            available = "true" if class_info.room_capacity > num_students_enrolled + 1 else "false"
 
             TransactItems = [
                 {
@@ -117,7 +117,11 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
                         "TableName": TableNames.ENROLLMENTS,
                         "Item": {
                             "class_id": class_id,
-                            "student_cwid": student_id
+                            "student_cwid": student_id,
+                            "student_info": {
+                                "first_name": first_name,
+                                "last_name": last_name
+                            }
                         },
                         "ConditionExpression": "attribute_not_exists(class_id) AND attribute_not_exists(student_cwid)"
                     }
@@ -128,9 +132,9 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
                         "Key": {
                             "id": class_id
                         },
-                        "UpdateExpression": "SET available_status = :new_value",
+                        "UpdateExpression": "SET available = :new_value",
                         "ExpressionAttributeValues": {
-                            ":new_value": available_status
+                            ":new_value": available
                         }
                     }
                 }
@@ -149,8 +153,14 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
 
             if num_students_on_waitlist < WAITLIST_CAPACITY:
                 current_timestamp = int(datetime.utcnow().timestamp())
-                redisdb.zadd(class_id, {student_id: current_timestamp})
 
+                # Generate a sorted set member 
+                new_member = f"{student_id}#{first_name}#{last_name}"
+
+                # Insert into Redis DB
+                redisdb.zadd(class_id, {new_member: current_timestamp})
+
+                # Return value
                 response_json = JSONResponse(status_code=HTTPStatus.CREATED,
                                              content={"detail": "Placed on waitlist"})
             else:
@@ -177,7 +187,7 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
 
 @student_router.delete("/enrollment/{class_id}", status_code=status.HTTP_200_OK)
 def drop_class(
-        class_id: int,
+        class_id: str,
         student_id: int = Header(
             alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
         dynamodb: DynamoClient = Depends(get_dynamodb)):
@@ -195,7 +205,7 @@ def drop_class(
     - HTTPException (409): If a conflict occurs
     """
     try:
-        available_status = "true"
+        available = "true"
 
         TransactItems = [
             {
@@ -232,9 +242,9 @@ def drop_class(
                     "Key": {
                         "id": class_id
                     },
-                    "UpdateExpression": "SET available_status = :new_value",
+                    "UpdateExpression": "SET available = :new_value",
                     "ExpressionAttributeValues": {
-                        ":new_value": available_status
+                        ":new_value": available
                     }
                 }
             }
@@ -269,9 +279,11 @@ def drop_class(
 
 @student_router.get("/waitlist/{class_id}/position/")
 def get_current_waitlist_position(
-        class_id: int,
+        class_id: str,
         student_id: int = Header(
             alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
+        first_name: str = Header(alias="x-first-name"),
+        last_name: str = Header(alias="x-last-name"),
         redisdb: Redis = Depends(get_redisdb)):
     """
     Retreive the position of the student on the waitlist.
@@ -284,7 +296,8 @@ def get_current_waitlist_position(
     """
     try:
         # Get the rank of the member in the sorted set
-        rank = redisdb.zrank(class_id, student_id)
+        member = f"{student_id}#{first_name}#{last_name}"
+        rank = redisdb.zrank(class_id, member)
 
         if rank is not None:
             response_json = {"position": rank + 1}
@@ -303,7 +316,7 @@ def get_current_waitlist_position(
 
 @student_router.delete("/waitlist/{class_id}/", status_code=status.HTTP_200_OK)
 def remove_from_waitlist(
-        class_id: int,
+        class_id: str,
         student_id: int = Header(
             alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
         redisdb: Redis = Depends(get_redisdb)):
