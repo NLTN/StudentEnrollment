@@ -27,6 +27,9 @@ class DynamoClient:
         response = client.delete_table(TableName=table_name)
         return response
 
+    def get_item(self, tablename: str, kwargs: dict):
+        return self.dyn_resource.Table(tablename).get_item(**kwargs)
+    
     def put_item(self, tablename: str, kwargs: dict):
         return self.dyn_resource.Table(tablename).put_item(**kwargs)
 

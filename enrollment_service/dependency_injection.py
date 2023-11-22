@@ -31,14 +31,33 @@ def sync_user_account(
     This function is designed to be used as a FastAPI dependency in web applications.
     """
     try:
-        kwargs = {
-            "Item": {
-                "cwid": cwid,
-                "first_name": first_name,
-                "last_name": last_name,
-                "roles": roles.split(",")
+        kwargs = {"Key": {"cwid": cwid}}
+        response = dynamodb.get_item(TableNames.PERSONNEL, kwargs)
+
+        if "Item" not in response:
+            # ***********************************************
+            # New user detected. INSERT user
+            # ***********************************************
+            kwargs = {
+                "Item": {
+                    "cwid": cwid,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "roles": roles.split(",")
+                }
             }
-        }
-        dynamodb.put_item(TableNames.PERSONNEL, kwargs)
+            dynamodb.put_item(TableNames.PERSONNEL, kwargs)
+
+        elif response["Item"]["first_name"] != first_name and response["Item"]["last_name"] != last_name:
+            # ***********************************************
+            # Data changes dectected. UPDATE data
+            # ***********************************************
+            kwargs = {
+                "Key": {"cwid": cwid},
+                "UpdateExpression": "SET first_name = :first_name, last_name = :last_name, roles = :roles",
+                "ExpressionAttributeValues": {":first_name": first_name, ":last_name": last_name, ":roles": roles},
+            }
+            dynamodb.update_item(TableNames.PERSONNEL, kwargs)
+
     except Exception as e:
         raise Exception(f"UserAccountSyncFailed: {e}")
