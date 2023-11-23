@@ -73,7 +73,7 @@ def enroll(class_id: Annotated[str, Body(embed=True)],
         response_json = {}
 
         # ---------------------------------------------------------------------
-        # Get the information of the class
+        # Get class information: room_capacity & enrollment_count
         # ---------------------------------------------------------------------
         get_class_params = {
             "Get": {
@@ -92,31 +92,21 @@ def enroll(class_id: Annotated[str, Body(embed=True)],
         class_info = ClassCreate(**responses[0]["Item"])
 
         # ---------------------------------------------------------------------
-        # Count the number of students enrolled in the class
-        # ---------------------------------------------------------------------
-        kwargs = {
-            "KeyConditionExpression": "class_id = :value",
-            "ExpressionAttributeValues": {":value": class_id},
-            "Select": "COUNT"
-        }
-
-        response = dynamodb.query(TableNames.ENROLLMENTS, kwargs)
-
-        num_students_enrolled = response["Count"]
-
-        # ---------------------------------------------------------------------
         # If there is an open seat, enroll the student in the class
         # ---------------------------------------------------------------------
-        if class_info.room_capacity > num_students_enrolled:
+        if class_info.room_capacity > class_info.enrollment_count:
 
             # After student enrolled in the class,
             # If there will be NO open seats (Class will be full),
             # Then, set available status to "false".
             # Otherwise, "true"
-            available = "true" if class_info.room_capacity > num_students_enrolled + 1 else "false"
+            available = "true" if class_info.room_capacity > class_info.enrollment_count + 1 else "false"
 
             TransactItems = [
                 {
+                    # ***********************************************
+                    # INSERT new item INTO enrollments table
+                    # ***********************************************
                     "Put": {
                         "TableName": TableNames.ENROLLMENTS,
                         "Item": {
@@ -131,14 +121,19 @@ def enroll(class_id: Annotated[str, Body(embed=True)],
                     }
                 },
                 {
+                    # ***********************************************
+                    # UPDATE class available status & enrollment_count
+                    # ***********************************************
                     "Update": {
                         "TableName": TableNames.CLASSES,
                         "Key": {
                             "id": class_id
                         },
-                        "UpdateExpression": "SET available = :new_value",
+                        "UpdateExpression": "SET available = :status, \
+                                                enrollment_count = enrollment_count + :step_size",
                         "ExpressionAttributeValues": {
-                            ":new_value": available
+                            ":status": available,
+                            ":step_size": 1
                         }
                     }
                 }
