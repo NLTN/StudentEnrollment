@@ -2,6 +2,45 @@ import os
 import requests
 from tests.settings import *
 
+class SampleUsers:
+    class registrar:
+        id: int
+        access_token: str
+    class instructor:
+        id: int
+        access_token: str
+    class student1:
+        id: int
+        access_token: str
+    class student2:
+        id: int
+        access_token: str
+
+def create_sample_users():
+    users = SampleUsers()
+    users.registrar.id = 800001
+    users.instructor.id = users.registrar.id
+    users.student1.id = 900001
+    users.student2.id = 900002
+
+    # ------------------ Registrar & Instructor ------------------
+    user_register(users.registrar.id, "john@fullerton.edu", "1234", "john",
+                    "smith", ["Registrar", "Instructor"])
+    users.registrar.access_token = user_login("john@fullerton.edu", password="1234")
+    users.instructor.access_token = users.registrar.access_token
+    
+    # ------------------ Student 01 ------------------
+    user_register(users.student1.id, "abc@csu.fullerton.edu", "1234", "nathan",
+                    "nguyen", ["Student"])
+    users.student1.access_token = user_login("abc@csu.fullerton.edu", password="1234")
+
+    # ------------------ Student 02 ------------------
+    user_register(users.student2.id, "abc2@csu.fullerton.edu", "1234", "nathan",
+                    "nguyen", ["Student"])
+    users.student2.access_token = user_login("abc2@csu.fullerton.edu", password="1234")
+
+    return users
+    
 def unittest_setUp():
     if USING_LITEFS_TO_REPLICATE_USER_DATABASE:
         # ------- If you're using LiteFS, READ ME -----------

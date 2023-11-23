@@ -13,33 +13,28 @@ class ClassTest(unittest.TestCase):
         unittest_tearDown()
 
     def test_get_available_class(self):
-        # ------------------ Registrar ------------------
-        # Register & Login
-        user_register(881234, "john@fullerton.edu", "1234", "john",
-                      "smith", ["Registrar"])
-        registrar_access_token = user_login("john@fullerton.edu", password="1234")
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
 
-        # Create a class for testing
-        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10, users.registrar.access_token)
+        class_id = response.json()["inserted_id"]
 
-        # ------------------ Student ------------------
-        # Register & Login
-        user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
 
-        # ------------------ CALL API ------------------
-        # Prepare header & message body
+        # -------------------- Make API request --------------------
         headers = {
             "Content-Type": "application/json;",
-            "Authorization": f"Bearer {student_access_token}"
+            "Authorization": f"Bearer {users.student1.access_token}"
         }
 
         # Send request
         url = f'{BASE_URL}/api/classes/available/'
         response = requests.get(url, headers=headers)
 
-        # Assert
+        # ------------------------- Assert -------------------------
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()), 1)
 
@@ -51,148 +46,92 @@ class EnrollmentTest(unittest.TestCase):
         unittest_tearDown()
 
     def test_enroll_class(self):
-        # ------------------ Registrar ------------------
-        # Register & Login
-        user_register(881234, "john@fullerton.edu", "1234", "john",
-                      "smith", ["Registrar"])
-        registrar_access_token = user_login("john@fullerton.edu", password="1234")
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
 
-        # Create a class for testing
-        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
-
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10, users.registrar.access_token)
         class_id = response.json()["inserted_id"]
 
-        # ------------------ Student ------------------
-        # Register & Login
-        user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
-
-        # Enroll 
-        response = enroll_class(class_id, student_access_token)
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
         
-        # Assert
+        # ------------------------- Assert -------------------------
         self.assertEqual(response.status_code, 201)
 
     def test_enroll_the_same_class(self):
-        # ------------------ Registrar ------------------
-        # Register & Login
-        user_register(881234, "john@fullerton.edu", "1234", "john",
-                      "smith", ["Registrar"])
-        registrar_access_token = user_login("john@fullerton.edu", password="1234")
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
 
-        # Create a class for testing
-        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
-
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10, users.registrar.access_token)
         class_id = response.json()["inserted_id"]
 
-        # ------------------ Student ------------------
-        # Register & Login
-        user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
 
-        # Enroll 
-        response = enroll_class(class_id, student_access_token)
-
-        # Enroll one more time
-        response = enroll_class(class_id, student_access_token)
+        # Student 1 enrolls in the same class
+        response = enroll_class(class_id, users.student1.access_token)
         
-        # Assert
+        # ------------------------- Assert -------------------------
         self.assertEqual(response.status_code, 409)
 
     def test_enroll_nonexisting_class(self):
-        # Register & Login
-        user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
 
         # Enroll 
-        response = enroll_class("111111", student_access_token)
+        response = enroll_class("111111", users.student1.access_token)
         
-        # Assert
+        # ------------------------- Assert -------------------------
         self.assertEqual(response.status_code, 404)
 
     def test_place_on_waitlist(self):
-        # ------------------ Registrar ------------------
-        # Register & Login
-        user_register(881234, "john@fullerton.edu", "1234", "john",
-                      "smith", ["Registrar"])
-        registrar_access_token = user_login("john@fullerton.edu", password="1234")
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
 
-        # Create a class for testing
-        response = create_class("SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
-
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 1, users.registrar.access_token)
         class_id = response.json()["inserted_id"]
 
-        # ------------------ Student 01: Enroll Success ------------------
-        # Register & Login
-        user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
 
-        # Enroll 
-        response = enroll_class(class_id, student_access_token)
-        
-        # Assert
-        self.assertEqual(response.status_code, 201)
+        # Student 2 enrolls
+        response = enroll_class(class_id, users.student2.access_token)
 
-        # ------------------ Student 02: Placed on Waitlist ------------------
-        # Register & Login
-        student_id = 88812801
-        user_register(student_id, "abc2@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc2@csu.fullerton.edu", password="1234")
-
-        # Enroll 
-        response = enroll_class(class_id, student_access_token)
-
+        # ------------------------- Assert -------------------------
         # Check if data inserted into Redis
         rdb = get_redisdb()
         rank = rdb.zrange(class_id, 0, -1)
 
-        # Assert
         self.assertEqual(response.status_code, 201)
         self.assertIsNotNone(rank)
 
     def test_already_on_waitlist(self):
-        # ------------------ Registrar ------------------
-        # Register & Login
-        user_register(881234, "john@fullerton.edu", "1234", "john",
-                      "smith", ["Registrar"])
-        registrar_access_token = user_login("john@fullerton.edu", password="1234")
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
 
-        # Create a class for testing
-        response = create_class("SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
-
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 1, users.registrar.access_token)
         class_id = response.json()["inserted_id"]
 
-        # ------------------ Student 01: Enroll Success ------------------
-        # Register & Login
-        user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
 
-        # Enroll 
-        response = enroll_class(class_id, student_access_token)
-        
-        # Assert
-        self.assertEqual(response.status_code, 201)
+        # Student 2 enrolls
+        response = enroll_class(class_id, users.student2.access_token)
 
-        # ------------------ Student 02: Placed on Waitlist ------------------
-        # Register & Login
-        student_id = 88812801
-        user_register(student_id, "abc2@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc2@csu.fullerton.edu", password="1234")
+        # Now, the student 2 is on the waitlist
+        # Student 2 try to enroll one more time
+        response = enroll_class(class_id, users.student2.access_token)
 
-        # Enroll 
-        response = enroll_class(class_id, student_access_token)
-        
-        # Enroll 
-        response = enroll_class(class_id, student_access_token)
-
-        # Assert
+        # ------------------------- Assert -------------------------
         self.assertEqual(response.status_code, 409)
 class DropClassTest(unittest.TestCase):
     def setUp(self):
@@ -202,61 +141,46 @@ class DropClassTest(unittest.TestCase):
         unittest_tearDown()
 
     def test_drop_class(self):
-        # ------------------ Registrar ------------------
-        # Register & Login
-        user_register(881234, "john@fullerton.edu", "1234", "john",
-                      "smith", ["Registrar"])
-        registrar_access_token = user_login("john@fullerton.edu", password="1234")
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
 
-        # Create a class for testing
-        response = create_class("SOC", "301", "2", 2024, "FA", 1, 10, registrar_access_token)
-        
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 10, users.registrar.access_token)
         class_id = response.json()["inserted_id"]
 
-        # ------------------ Student ------------------
-        # Register & Login
-        user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
 
-        # Enroll 
-        response = enroll_class(class_id, student_access_token)
-        
-        # Assert
-        self.assertEqual(response.status_code, 201)
-
-        # ------------- DROP CLASS --------
-
-        # Prepare header & message body
+        # -------------------- Make API request --------------------
         headers = {
             "Content-Type": "application/json;",
-            "Authorization": f"Bearer {student_access_token}"
+            "Authorization": f"Bearer {users.student1.access_token}"
         }
 
         # Send request
         url = f'{BASE_URL}/api/enrollment/{class_id}/'
         response = requests.delete(url, headers=headers)
 
-        # Assert
+        # ------------------------- Assert -------------------------
         self.assertEqual(response.status_code, 200)
 
     def test_drop_nonexisting_class(self):
-        # Register & Login
-        user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
 
-        # Prepare header & message body
+        # -------------------- Make API request --------------------
         headers = {
             "Content-Type": "application/json;",
-            "Authorization": f"Bearer {student_access_token}"
+            "Authorization": f"Bearer {users.student1.access_token}"
         }
 
         # Send request
         url = f'{BASE_URL}/api/enrollment/999123/'
         response = requests.delete(url, headers=headers)
 
-        # Assert
+        # ------------------------- Assert -------------------------
         self.assertEqual(response.status_code, 404)
 
 class WaitlistTest(unittest.TestCase):
@@ -267,100 +191,60 @@ class WaitlistTest(unittest.TestCase):
         unittest_tearDown()
 
     def test_get_current_position_on_waitlist(self):
-        # ------------------ Registrar ------------------
-        # Register & Login
-        user_register(881234, "john@fullerton.edu", "1234", "john",
-                      "smith", ["Registrar"])
-        registrar_access_token = user_login("john@fullerton.edu", password="1234")
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
 
-        # Create a class for testing
-        response = create_class("SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
-
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 1, users.registrar.access_token)
         class_id = response.json()["inserted_id"]
 
-        # ------------------ Student 01: Enroll Success ------------------
-        # Register & Login
-        user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
 
-        # Enroll 
-        response = enroll_class(class_id, student_access_token)
-        
-        # Assert
-        self.assertEqual(response.status_code, 201)
+        # Student 2 enrolls
+        response = enroll_class(class_id, users.student2.access_token)
 
-        # ------------------ Student 02: Placed on Waitlist ------------------
-        # Register & Login
-        student_id = 88812801
-        user_register(student_id, "abc2@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc2@csu.fullerton.edu", password="1234")
-
-        # Enroll 
-        response = enroll_class(class_id, student_access_token)
-
-        # ------------------ CALL API ------------------
-        # Prepare header & message body
+        # -------------------- Make API request --------------------
         headers = {
             "Content-Type": "application/json;",
-            "Authorization": f"Bearer {student_access_token}"
+            "Authorization": f"Bearer {users.student2.access_token}"
         }
 
         # Send request
         url = f'{BASE_URL}/api/waitlist/{class_id}/position/'
         response = requests.get(url, headers=headers)
 
-        # Assert
+        # ------------------------- Assert -------------------------
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["position"], 1)
 
     def test_remove_from_waitlist(self):
-        # ------------------ Registrar ------------------
-        # Register & Login
-        user_register(881234, "john@fullerton.edu", "1234", "john",
-                      "smith", ["Registrar"])
-        registrar_access_token = user_login("john@fullerton.edu", password="1234")
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
 
-        # Create a class for testing
-        response = create_class("SOC", "301", "2", 2024, "FA", 1, 1, registrar_access_token)
-
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 1, users.registrar.access_token)
         class_id = response.json()["inserted_id"]
 
-        # ------------------ Student 01: Enroll Success ------------------
-        # Register & Login
-        user_register(9991234, "abc@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc@csu.fullerton.edu", password="1234")
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
 
-        # Enroll 
-        response = enroll_class(class_id, student_access_token)
-        
-        # Assert
-        self.assertEqual(response.status_code, 201)
+        # Student 2 enrolls
+        response = enroll_class(class_id, users.student2.access_token)
 
-        # ------------------ Student 02: Placed on Waitlist ------------------
-        # Register & Login
-        student_id = 88812801
-        user_register(student_id, "abc2@csu.fullerton.edu", "1234", "nathan",
-                      "nguyen", ["Student"])
-        student_access_token = user_login("abc2@csu.fullerton.edu", password="1234")
-
-        # Enroll 
-        response = enroll_class(class_id, student_access_token)
-
-        # ------------------ CALL API ------------------
-        # Prepare header & message body
+        # -------------------- Make API request --------------------
         headers = {
             "Content-Type": "application/json;",
-            "Authorization": f"Bearer {student_access_token}"
+            "Authorization": f"Bearer {users.student2.access_token}"
         }
 
         # Send request
         url = f'{BASE_URL}/api/waitlist/{class_id}/'
         response = requests.delete(url, headers=headers)
 
-        # Assert
+        # ------------------------- Assert -------------------------
         self.assertEqual(response.status_code, 200)
 
 if __name__ == '__main__':
