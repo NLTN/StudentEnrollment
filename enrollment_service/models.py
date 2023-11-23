@@ -31,7 +31,8 @@ class ClassCreate(BaseModel):
     semester: str
     instructor_cwid: int
     room_capacity:int
-    available: str = "true" 
+    enrollment_count: int = 0
+    available: str = "true"
 
 class ClassPatch(BaseModel):
     instructor_cwid: Optional[int] = None

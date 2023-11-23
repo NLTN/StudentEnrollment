@@ -5,7 +5,7 @@ from botocore.exceptions import ClientError
 from .dynamoclient import DynamoClient
 from .db_connection import get_dynamodb, get_redisdb, TableNames
 
-def is_auto_enroll_enabled(db: sqlite3.Connection):
+def is_auto_enroll_enabled(dynamodb: DynamoClient):
     """
     Check if automatic enrollment is enabled
 
@@ -15,10 +15,9 @@ def is_auto_enroll_enabled(db: sqlite3.Connection):
     Returns:
         bool: True if automatic enrollment is enabled. Otherwise, False.
     """
-    
-    cursor = db.execute("SELECT automatic_enrollment FROM configs")
-    result = cursor.fetchone()
-    return result[0] == 1
+    kwargs = {"Key": {"variable_name": "auto_enrollment_enabled"}}
+    response = dynamodb.get_item(TableNames.CONFIGS, kwargs)
+    return response["Item"]["value"] == True
 
 def get_available_classes_within_first_2weeks(db: sqlite3.Connection):
     """
@@ -44,60 +43,101 @@ def get_available_classes_within_first_2weeks(db: sqlite3.Connection):
     rows = cursor.fetchall()
     return [row[0] for row in rows]
 
-def enroll_students_from_waitlist(db: sqlite3.Connection, class_id_list: list[int]):
+def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
     """
     This function checks the waitlist for available spots in the classes
     and enrolls students accordingly.
 
     Parameters:
-        db (sqlite3.Connection): Database connection.
+        dynamodb (DynamoClient): Database connection.
 
     Returns:
         int: The number of success enrollments.
     """
     
-    enrollment_count = 0
-
-    try:
-        for e in class_id_list:
-            cursor = db.execute(
-            """
-            INSERT INTO enrollment (class_id, student_id, enrollment_date)
-                SELECT class_id, student_id, datetime('now')
-                FROM waitlist
-                WHERE class_id=$0
-                ORDER BY waitlist_date ASC
-                LIMIT (
-                        (SELECT room_capacity 
-                        FROM class
-                        WHERE id=$0) - (SELECT COUNT(student_id)
-                                        FROM enrollment
-                                        WHERE class_id=$0
-                                        )
-                    );
-            """, [e])
-
-            cursor = db.execute(
-            """
-            DELETE FROM waitlist
-            WHERE student_id IN (
-                SELECT student_id
-                FROM waitlist
-                ORDER BY waitlist_date
-                LIMIT $0
-            );
-            """, [cursor.rowcount])
-
-            enrollment_count += cursor.rowcount
-        
-        db.commit()
-    except sqlite3.Error as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
+    num_students_enrolled = 0
     
-    return enrollment_count
+    try:
+        redisdb = get_redisdb()
+
+        for class_id in class_id_list:
+            # ---------------------------------------------------------------------
+            # Get class information: num_open_seats = room_capacity - enrollment_count
+            # ---------------------------------------------------------------------
+            kwargs = {"Key": {"id": class_id}}
+            response = dynamodb.get_item(TableNames.CLASSES, kwargs)
+            
+            if "room_capacity" in response["Item"]:
+                room_capacity = int(response["Item"]["room_capacity"])
+            else:
+                room_capacity = 0
+
+            if "enrollment_count" in response["Item"]:
+                enrollment_count = int(response["Item"]["enrollment_count"])
+            else:
+                enrollment_count = 0
+
+            num_open_seats = room_capacity - enrollment_count
+
+            # ---------------------------------------------------------------------
+            # Move students from the waitlist to enrollments
+            # ---------------------------------------------------------------------
+            if num_open_seats > 0:
+                # ***********************************************
+                # Get the first n students from the waitlist
+                # ***********************************************
+                members = redisdb.zrange(class_id, 0, num_open_seats - 1)
+                student_id, first_name, last_name = members[0].decode('utf-8').split("#")
+
+                # ***********************************************
+                # Build a list of PutRequests 
+                # ***********************************************
+                enrollment_table_requests = []
+
+                for m in members:
+                    student_id, first_name, last_name = m.decode('utf-8').split("#")
+                    item = {
+                        "PutRequest": {
+                            "Item": {
+                                "class_id": class_id, 
+                                "student_cwid": int(student_id),
+                                "student_info": {
+                                    "first_name": first_name,
+                                    "last_name": last_name
+                                }
+                            }
+                        }                        
+                    }
+                    enrollment_table_requests.append(item)
+
+                # ***********************************************
+                # BATCH INSERT INTO enrollments
+                # ***********************************************
+                batch_write_request = {
+                    'RequestItems': {TableNames.ENROLLMENTS: enrollment_table_requests}
+                }
+                
+                # Perform the batch write operation
+                dynamodb.batch_write_item(batch_write_request)
+            
+                # ***********************************************
+                # Delete those students from the waitlist 
+                # because they enrolled successfully
+                # ***********************************************
+                redisdb.zremrangebyrank(class_id, 0, num_open_seats - 1)
+
+
+                # ***********************************************
+                # Update the counter
+                # ***********************************************
+                num_students_enrolled += num_open_seats
+
+    except Exception as e:
+        print(e)
+    finally:
+        redisdb.close()  # Close the Redis connection
+    
+    return num_students_enrolled
 
 
 def add_to_waitlist(class_id, student_id, member_name: str, score: int):
@@ -127,13 +167,13 @@ def add_to_waitlist(class_id, student_id, member_name: str, score: int):
     except Exception as e:
         raise Exception(f"AddToWaitlistFailed: {e}")
 
-def drop_from_enrollment(class_id, student_id, administrative:bool, dynamodb: DynamoClient):
+def drop_from_enrollment(class_id, student_id, administrative: bool, dynamodb: DynamoClient):
     try:
         TransactItems = [
             {
-                # ---------------------------------------------------------------------
+                # ***********************************************
                 # DELETE FROM enrollment table
-                # ---------------------------------------------------------------------
+                # ***********************************************
                 "Delete": {
                     "TableName": TableNames.ENROLLMENTS,
                     "Key": {
@@ -144,9 +184,9 @@ def drop_from_enrollment(class_id, student_id, administrative:bool, dynamodb: Dy
                 }
             },
             {
-                # ---------------------------------------------------------------------
+                # ***********************************************
                 # INSERT INTO droplist table
-                # ---------------------------------------------------------------------
+                # ***********************************************
                 "Put": {
                     "TableName": TableNames.DROPLIST,
                     "Item": {
@@ -157,17 +197,20 @@ def drop_from_enrollment(class_id, student_id, administrative:bool, dynamodb: Dy
                 }
             },
             {
-                # ---------------------------------------------------------------------
-                # UPDATE Class available status
-                # ---------------------------------------------------------------------
+                # ***********************************************
+                # UPDATE class available status & enrollment_count
+                # ***********************************************
                 "Update": {
                     "TableName": TableNames.CLASSES,
                     "Key": {
                         "id": class_id
                     },
-                    "UpdateExpression": "SET available = :new_value",
+                    "UpdateExpression": "SET available = :status, \
+                                            enrollment_count = if_not_exists(enrollment_count, :zero) + :step_size",
                     "ExpressionAttributeValues": {
-                        ":new_value": "true"
+                        ":status": "true",
+                        ":step_size": -1,
+                        ":zero": 0
                     }
                 }
             }
@@ -179,6 +222,8 @@ def drop_from_enrollment(class_id, student_id, administrative:bool, dynamodb: Dy
         # Trigger auto enrollment
         # ---------------------------------------------------------------------
         # TODO: Call the function auto_enrollment_from_waitlist()
+        if is_auto_enroll_enabled(dynamodb):
+            enroll_students_from_waitlist([class_id], dynamodb)
 
     except ClientError as e:
         if e.response["Error"]["Code"] == "TransactionCanceledException":
@@ -195,6 +240,6 @@ def drop_from_enrollment(class_id, student_id, administrative:bool, dynamodb: Dy
         raise HTTPException(status_code=e.status_code, detail=str(e.detail))
     except Exception as e:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                            detail="INTERNAL SERVER ERROR")
+                            detail=e)
     else:
         return {"detail": "Item deleted successfully"}
