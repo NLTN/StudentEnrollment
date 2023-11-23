@@ -5,7 +5,7 @@ from .db_connection import get_db
 from .enrollment_helper import enroll_students_from_waitlist, is_auto_enroll_enabled
 from .dependency_injection import *
 from .models import Personnel, Settings
-from .Dynamo import DYNAMO_TABLENAMES
+from .Dynamo import Dynamo, DYNAMO_TABLENAMES
 from http import HTTPStatus
 import time
 from fastapi.responses import JSONResponse
@@ -17,9 +17,25 @@ MAX_NUMBER_OF_WAITLISTS_PER_STUDENT = 3
 student_router = APIRouter()
 
 @student_router.get("/classes/available/", dependencies=[Depends(get_or_create_user)])
-def get_available_classes(db: Any = Depends(get_dynamo), user: Personnel = Depends(get_current_user)):
-    '''
-    EXAMPLE ONLY (please reimplement this endpoint)
+def get_available_classes(
+    db: Dynamo = Depends(get_dynamo), 
+    user: Personnel = Depends(get_current_user)
+):
+    """
+    Retrieve all classes this student is eligible to enroll in or be put on the waitlist for
+
+    Parameters:
+        user - Student searching for available classes
+
+    Returns:
+        - dict: A dictionary containing the details of the classes
+
+    Dependencies:
+        - Tables:
+            - Classes
+            - Enrollment
+            - Waitlist
+
     requirements:
         - "x-cwid", "x-first-name", "x-last-name", "x-roles" headers from krakend must be propagated
 
@@ -35,41 +51,56 @@ def get_available_classes(db: Any = Depends(get_dynamo), user: Personnel = Depen
 
         3: get_current_user -> abstraction to make current user accessible within the endpoint. this function just returns
             the user object saved in request state from get_or_create_user 
-    '''
-    return {"user" : user.cwid}
-# def get_available_classes(db: sqlite3.Connection = Depends(get_db),  student_id: int = Header(
-#         alias="x-cwid", description="A unique ID for students, instructors, and registrars")):
-#     """
-#     Retreive all available classes.
+            
+            SELECT c.*
+            FROM "class" as c
+            WHERE datetime('now') BETWEEN c.enrollment_start AND c.enrollment_end 
+                AND (
+                        (c.room_capacity > 
+                            (SELECT COUNT(enrollment.student_id)
+                            FROM enrollment
+                            WHERE class_id=c.id) > 0) 
+                        OR ((SELECT COUNT(waitlist.student_id)
+                            FROM waitlist
+                            WHERE class_id=c.id) < ?)
+                    );
+    """
 
-#     Returns:
-#     - dict: A dictionary containing the details of the classes
-#     """
-#     print(student_id)
-#     try:
-#         classes = db.execute(
-#             """
-#             SELECT c.*
-#             FROM "class" as c
-#             WHERE datetime('now') BETWEEN c.enrollment_start AND c.enrollment_end 
-#                 AND (
-#                         (c.room_capacity > 
-#                             (SELECT COUNT(enrollment.student_id)
-#                             FROM enrollment
-#                             WHERE class_id=c.id) > 0) 
-#                         OR ((SELECT COUNT(waitlist.student_id)
-#                             FROM waitlist
-#                             WHERE class_id=c.id) < ?)
-#                     );
-#             """, [WAITLIST_CAPACITY]
-#         )
-#     except sqlite3.Error as e:
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail={"type": type(e).__name__, "msg": str(e)},
-#         )
-#     finally:
-#         return {"classes": classes.fetchall()}
+    cwid = user.cwid
+    first = user.first_name
+    last = user.last_name
+    roles = user.roles
+
+    # get all classes where student's cwid is not on the waitlist or the enrollment for that class
+
+    get_student_waitlist_params = {
+        "Get" : {
+            "TableName" : DYNAMO_TABLENAMES['waitlist_participation'],
+            "Key" : {
+                "cwid" : user.cwid
+            }
+        }
+    }
+
+    get_student_enrollment_params = {
+        "Get" : {
+            "TableName" : DYNAMO_TABLENAMES["enrollment"],            
+            "Key" : {
+                "student_cwid" : user.cwid           
+            }
+        }
+    }
+    try:
+        #all_classes = db.dyn_resource.Table(DYNAMO_TABLENAMES['class']).scan() 
+        #db.query(DYNAMO_TABLENAMES['class'],class_params)
+        avail_classes = db.transact_get_items(transact_items=[get_student_enrollment_params,get_student_waitlist_params])
+
+    except sqlite3.Error as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"type": type(e).__name__, "msg": str(e)},
+        )
+    return {"classes": avail_classes[0]}
 
 @student_router.post("/enrollment/{class_term_slug}", dependencies=[Depends(get_or_create_user)])
 def enroll(class_term_slug: str, db: Any = Depends(get_dynamo), db_redis: Any = Depends(get_redis), user: Personnel = Depends(get_current_user)):

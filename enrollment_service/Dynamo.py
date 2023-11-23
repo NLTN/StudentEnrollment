@@ -3,7 +3,7 @@ from botocore.exceptions import ClientError
 from .models import Settings
 
 DYNAMO_TABLENAMES = {
-    'class' : "Class",
+    "class" : "Class",
     "course" : "Course",
     "personnel" : "Personnel",
     "enrollment" : "Enrollment",
@@ -12,7 +12,7 @@ DYNAMO_TABLENAMES = {
 }
 
 class Dynamo:
-    def __init__ (self, config: Settings):
+    def __init__(self, config: Settings):
          self.dyn_resource = boto3.resource(
             "dynamodb",
             aws_access_key_id=config.aws_access_key_id,
