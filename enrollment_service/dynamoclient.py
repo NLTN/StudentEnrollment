@@ -35,6 +35,9 @@ class DynamoClient:
 
     def update_item(self, tablename: str, kwargs: dict):
         return self.dyn_resource.Table(tablename).update_item(**kwargs)
+    
+    def batch_write_item(self, kwargs: dict):
+        return self.dyn_resource.batch_write_item(**kwargs)
 
     def query(self, tablename: str, kwargs: dict):
         return self.dyn_resource.Table(tablename).query(**kwargs)
