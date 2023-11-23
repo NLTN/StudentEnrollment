@@ -5,10 +5,11 @@ from pydantic_settings import BaseSettings
 
 
 class TableNames:
-    CONFIGS = "config"
-    COURSES = "Course"
-    CLASSES = "Class"
-    ENROLLMENTS = "Enrollment"
+    CONFIGS = "Configs"
+    COURSES = "Courses"
+    CLASSES = "Classes"
+    ENROLLMENTS = "Enrollments"
+    DROPLIST = "Droplist"
     PERSONNEL = "Personnel"
 
 

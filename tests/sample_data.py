@@ -15,7 +15,6 @@ def insert_courses():
     print(f"Table {table_name}: {len(sample_data)} items")
 
 def insert_personel():
-    table_name = TableNames.PERSONNEL
     sample_data = [
         {"cwid": 1, "first_name": "John", "last_name": "Smith", "roles": ["Instructor", "Registrar"]},
         {"cwid": 2, "first_name": "Mary", "last_name": "Brown", "roles": ["Instructor"]},
@@ -25,8 +24,6 @@ def insert_personel():
     dynamodb = get_dynamodb()
     for item in sample_data:
         dynamodb.Table(TableNames.PERSONNEL).put_item(Item=item)
-
-    print(f"Table {table_name}: {len(sample_data)} items")
 
 if __name__ == "__main__":
     insert_personel()

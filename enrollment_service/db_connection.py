@@ -1,15 +1,13 @@
-import boto3
 import redis
-from redis import Redis
 from pydantic_settings import BaseSettings
 from .dynamoclient import DynamoClient
 
 
 class TableNames:
-    CONFIGS = "Config"
-    COURSES = "Course"
-    CLASSES = "Class"
-    ENROLLMENTS = "Enrollment"
+    CONFIGS = "Configs"
+    COURSES = "Courses"
+    CLASSES = "Classes"
+    ENROLLMENTS = "Enrollments"
     DROPLIST = "Droplist"
     PERSONNEL = "Personnel"
 

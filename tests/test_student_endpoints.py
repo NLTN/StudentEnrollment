@@ -1,9 +1,8 @@
-import os
 import unittest
 import requests
 from tests.helpers import *
-from tests.settings import BASE_URL, USER_DB_PATH, ENROLLMENT_DB_PATH
-from db_connection import get_redisdb
+from tests.settings import BASE_URL
+from tests.db_connection import get_redisdb
 
 class ClassTest(unittest.TestCase):
     def setUp(self):
