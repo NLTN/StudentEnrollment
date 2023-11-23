@@ -8,19 +8,18 @@ Operating system: Debian-based Linux (Ubuntu, etc.)
 Run `sh ./bin/install.sh`.
 
 ### How to run
-- Run `sh run.sh` to start the services.
-- Run `sh ./bin/create-user-db.sh` to create user database.
-- Run `sh ./bin/create-enrollment-db.sh` to create enrollment service database.
+- Execute `sh run.sh` to start the services.
+- After the services are up and running, execute `sh ./bin/seed.sh` to populate the database with an initial set of data.
 
 ## Microservice Diagram
-<img src="https://raw.githubusercontent.com/NLTN/Assets/main/StudentEnrollment/APIGateway.svg" height="230">
+<img src="https://github.com/NLTN/Assets/blob/main/StudentEnrollment/APIGatewayV2.png?raw=true">
 
 ## Database ER Diagram
 #### User Service
 <img src="https://github.com/NLTN/Assets/blob/main/StudentEnrollment/UserERDiagram.png?raw=true">
 
 #### Enrollment Service
-<img src="https://github.com/NLTN/Assets/blob/main/StudentEnrollment/EnrollmentERDiagram.png?raw=true">
+<img src="https://github.com/NLTN/Assets/blob/main/StudentEnrollment/EnrollmentNoSQLDiagram.png?raw=true">
 
 ## API Gateway endpoints
 #### User Service >>[Show Examples](../../wiki/Examples-‐-User-Endpoints)

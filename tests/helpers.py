@@ -2,6 +2,45 @@ import os
 import requests
 from tests.settings import *
 
+class SampleUsers:
+    class registrar:
+        id: int
+        access_token: str
+    class instructor:
+        id: int
+        access_token: str
+    class student1:
+        id: int
+        access_token: str
+    class student2:
+        id: int
+        access_token: str
+
+def create_sample_users():
+    users = SampleUsers()
+    users.registrar.id = 800001
+    users.instructor.id = users.registrar.id
+    users.student1.id = 900001
+    users.student2.id = 900002
+
+    # ------------------ Registrar & Instructor ------------------
+    user_register(users.registrar.id, "john@fullerton.edu", "1234", "john",
+                    "smith", ["Registrar", "Instructor"])
+    users.registrar.access_token = user_login("john@fullerton.edu", password="1234")
+    users.instructor.access_token = users.registrar.access_token
+    
+    # ------------------ Student 01 ------------------
+    user_register(users.student1.id, "abc@csu.fullerton.edu", "1234", "nathan",
+                    "nguyen", ["Student"])
+    users.student1.access_token = user_login("abc@csu.fullerton.edu", password="1234")
+
+    # ------------------ Student 02 ------------------
+    user_register(users.student2.id, "abc2@csu.fullerton.edu", "1234", "nathan",
+                    "nguyen", ["Student"])
+    users.student2.access_token = user_login("abc2@csu.fullerton.edu", password="1234")
+
+    return users
+    
 def unittest_setUp():
     if USING_LITEFS_TO_REPLICATE_USER_DATABASE:
         # ------- If you're using LiteFS, READ ME -----------
@@ -16,9 +55,12 @@ def unittest_setUp():
         os.system(f"[ ! -f {USER_DB_PATH} ] || cp {USER_DB_PATH} {USER_DB_PATH}.backup")
         os.system("sh ./bin/create-user-db.sh > /dev/null")
 
-    # Backup Enrollment service database
-    os.system(f"[ ! -f {ENROLLMENT_DB_PATH} ] || mv {ENROLLMENT_DB_PATH} {ENROLLMENT_DB_PATH}.backup")
-    os.system("sh ./bin/create-enrollment-db.sh > /dev/null")
+    # Reset Enrollment service database
+    os.system("sh ./bin/seed.sh > /dev/null")
+    os.system("python3 tests/sample_data.py")
+
+    # Reset Redis DB
+    os.system("redis-cli FLUSHDB")
 
 def unittest_tearDown():
     if USING_LITEFS_TO_REPLICATE_USER_DATABASE:
@@ -29,9 +71,11 @@ def unittest_tearDown():
         os.system(f"rm -f {USER_DB_PATH}")
         os.system(f"[ ! -f {USER_DB_PATH}.backup ] || mv {USER_DB_PATH}.backup {USER_DB_PATH}")
 
-    # Restore Enrollment service database
-    os.system(f"rm -f {ENROLLMENT_DB_PATH}")
-    os.system(f"[ ! -f {ENROLLMENT_DB_PATH}.backup ] || mv {ENROLLMENT_DB_PATH}.backup {ENROLLMENT_DB_PATH}")
+    # Reset Enrollment service database
+    # os.system("sh ./bin/seed.sh > /dev/null")
+
+    # Reset Redis DB
+    # os.system("redis-cli FLUSHDB")
 
 def user_register(user_id, username, password, first_name, last_name, roles: list[str]):
     url = f'{BASE_URL}/api/register'
@@ -60,26 +104,21 @@ def user_login(username, password):
     
     return None
 
-def create_class(dept_code, course_num, section_no, academic_year, semester,
-                instructor_id, room_capacity, 
-                course_start_date, enrollment_start, enrollment_end, access_token):
-    # Prepare header & message body        
+def create_class(dept_code, course_no, section_no, academic_year, semester,
+                instructor_id, room_capacity, access_token):
+    # Prepare header & message body
     headers = {
         "Content-Type": "application/json;",
         "Authorization": f"Bearer {access_token}"
     }
     body = {
-        "dept_code": dept_code,
-        "course_num": course_num,
+        "department_code": dept_code,
+        "course_no": course_no,
         "section_no": section_no,
-        "academic_year": academic_year,
+        "year": academic_year,
         "semester": semester,
-        "instructor_id": instructor_id,
-        "room_num": 205,
-        "room_capacity": room_capacity,
-        "course_start_date": course_start_date,
-        "enrollment_start": enrollment_start,
-        "enrollment_end": enrollment_end
+        "instructor_cwid": instructor_id,
+        "room_capacity": room_capacity
     }
 
     # Send request

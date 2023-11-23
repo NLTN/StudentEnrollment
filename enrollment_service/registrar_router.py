@@ -1,53 +1,56 @@
-from typing import Annotated
-import sqlite3
-from fastapi import Depends, Response, HTTPException, Body, status, APIRouter
-from .db_connection import get_db
-from .enrollment_helper import enroll_students_from_waitlist, get_available_classes_within_first_2weeks
-from .models import Course, ClassCreate, ClassPatch
+from typing import Annotated, Any
+from http import HTTPStatus
+from fastapi import Depends, Response, HTTPException, Body, status, APIRouter, Request
+from fastapi.responses import JSONResponse
+from botocore.exceptions import ClientError
+from .dynamoclient import DynamoClient
+from .db_connection import get_dynamodb, TableNames
+from .dependency_injection import sync_user_account
+from .models import Course, ClassCreate, ClassPatch, Config
 
 registrar_router = APIRouter()
 
+
 @registrar_router.put("/auto-enrollment/")
-def set_auto_enrollment(enabled: Annotated[bool, Body(embed=True)], db: sqlite3.Connection = Depends(get_db)):
+def set_auto_enrollment(config: Config, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Endpoint for enabling/disabling automatic enrollment.
 
     Parameters:
-    - enabled (bool): A boolean indicating whether automatic enrollment should be enabled or disabled.
+    - semester (str): term's semester
+    - year (int) : term's year 
+    - auto_enrollment_enabled (bool): A boolean indicating whether automatic enrollment should be enabled or disabled.
 
     Raises:
-    - HTTPException (409): If there is an integrity error while updating the database.
+    - HTTPException (404): If the enrollment period is not found.
 
     Returns:
         dict: A dictionary containing a detail message confirming the status of auto enrollment.
     """
     try:
-        db.execute("UPDATE configs set automatic_enrollment = ?;", [enabled])
-        db.commit()
-
-        if enabled:
-            opening_classes = get_available_classes_within_first_2weeks(db)
-            enroll_students_from_waitlist(db, opening_classes)
-
-    except sqlite3.IntegrityError as e:
+        kwargs = {
+            "Item": {
+                "variable_name": "auto_enrollment_enabled",
+                "value": config.auto_enrollment_enabled
+            }
+        }
+        dynamodb.put_item(TableNames.CONFIGS, kwargs)
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
+    else:
+        return {"detail": "success"}
 
-    return {"detail": f"Auto enrollment: {enabled}"}
 
-@registrar_router.post("/courses/", status_code=status.HTTP_201_CREATED)
-def create_course(
-    course: Course, response: Response, db: sqlite3.Connection = Depends(get_db)
-):
+@registrar_router.post("/courses/")
+def create_course(course: Course, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Creates a new course with the provided details.
 
     Parameters:
     - `course` (CourseInput): JSON body input for the course with the following fields:
         - `department_code` (str): The department code for the course.
-        - `course_no` (int): The course number.
+        - `course_no` (str): The course number.
         - `title` (str): The title of the course.
 
     Returns:
@@ -56,158 +59,227 @@ def create_course(
     Raises:
     - HTTPException (409): If a conflict occurs (e.g., duplicate course).
     """
-    record = dict(course)
     try:
-        cur = db.execute(
-            """
-            INSERT INTO course(department_code, course_no, title)
-            VALUES(:department_code, :course_no, :title)
-            """, record)
-        db.commit()
-    except sqlite3.IntegrityError as e:
+        kwargs = {
+            "Item": dict(course),
+            "ConditionExpression": "attribute_not_exists(department_code) AND attribute_not_exists(course_no)"
+        }
+        dynamodb.put_item(TableNames.COURSES, kwargs)
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            raise HTTPException(status_code=HTTPStatus.CONFLICT,
+                                detail="Item already exists")
+        else:
+            raise Exception(e.response)
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
-    return record
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
+    else:
+        return JSONResponse(status_code=HTTPStatus.CREATED, content={"message": "Item created successfully"})
 
-@registrar_router.post("/classes/", status_code=status.HTTP_201_CREATED)
-def create_class(
-    body_data: ClassCreate, response: Response, db: sqlite3.Connection = Depends(get_db)
-):
+
+@registrar_router.post("/classes/", dependencies=[Depends(sync_user_account)])
+def create_class(new_class: ClassCreate, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Creates a new class.
 
     Parameters:
-    - `class` (Class): The JSON object representing the class with the following properties:
-        - `dept_code` (str): Department code.
-        - `course_num` (int): Course number.
+    - `class` (ClassCreate): The JSON object representing the class with the following properties:
+        - `department_code` (str): Department code.
+        - `course_no` (int): Course number.
         - `section_no` (int): Section number.
-        - `academic_year` (int): Academic year.
+        - `year` (int): Academic year.
         - `semester` (str): Semester name (SP, SU, FA, WI).
-        - `instructor_id` (int): Instructor ID.
-        - `room_num` (int): Room number.
+        - `instructor_cwid` (int): Instructor ID.
         - `room_capacity` (int): Room capacity.
-        - `course_start_date` (str): Course start date (format: "YYYY-MM-DD").
-        - `enrollment_start` (str): Enrollment start date (format: "YYYY-MM-DD HH:MM:SS.SSS").
-        - `enrollment_end` (str): Enrollment end date (format: "YYYY-MM-DD HH:MM:SS.SSS").
+
 
     Returns:
     - dict: A dictionary containing the details of the created item.
 
     Raises:
     - HTTPException (409): If a conflict occurs (e.g., duplicate course).
+    - HTTPException (400): If course information or instructor information is not found
     """
-    record = dict(body_data)
-    try:
-        cur = db.execute(
-            """
-            INSERT INTO class(dept_code, course_num, section_no, 
-                    academic_year, semester, instructor_id, room_num, room_capacity, 
-                    course_start_date, enrollment_start, enrollment_end)
-            VALUES(:dept_code, :course_num, :section_no,
-                    :academic_year, :semester, :instructor_id, :room_num, :room_capacity, 
-                    :course_start_date, :enrollment_start, :enrollment_end)
-            """, record)
-        db.commit()
-    except sqlite3.IntegrityError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
-    response.headers["Location"] = f"/classes/{cur.lastrowid}"
-    return {"detail": "Success", "inserted_id": cur.lastrowid}
+    get_course_kwargs = {
+        "Get": {
+            "TableName": TableNames.COURSES,
+            "Key": {
+                "department_code": new_class.department_code,
+                "course_no": new_class.course_no,
+            }
+        }
+    }
 
-@registrar_router.delete("/classes/{id}", status_code=status.HTTP_200_OK)
-def delete_class(
-    id: int, response: Response, db: sqlite3.Connection = Depends(get_db)
-):
+    get_instructor_kwargs = {
+        "Get": {
+            "TableName": TableNames.PERSONNEL,
+            "Key": {
+                "cwid": new_class.instructor_cwid
+            }
+        }
+    }
+
+    try:
+        # ---------------------------------------------------------------------
+        # Check if course & instructor exists
+        # ---------------------------------------------------------------------
+        responses = dynamodb.transact_get_items(
+            [get_course_kwargs, get_instructor_kwargs])
+
+        if not responses[0]:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                                detail="Course information not found")
+
+        if not responses[1] or not "Instructor" in responses[1]["Item"]["roles"]:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                                detail="Instructor not found")
+        
+        # ---------------------------------------------------------------------
+        # Insert into DB
+        # ---------------------------------------------------------------------
+        # Generate class_id. Example format: 2024.Fall.CPSC.335.2
+        new_class.id = f"{new_class.year}.{new_class.semester}.{new_class.department_code}.{new_class.section_no}"
+
+        # Convert to dictionary
+        record = dict(new_class)
+
+        # Add class name
+        record["title"] = responses[0]["Item"]["title"]
+
+        # Add instructor info
+        record["instructor_info"] = {
+            "first_name": responses[1]["Item"]["first_name"],
+            "last_name": responses[1]["Item"]["last_name"]
+        }
+
+        kwargs = {
+            "Item": record,
+            "ConditionExpression": "attribute_not_exists(id)"
+        }
+
+        dynamodb.put_item(TableNames.CLASSES, kwargs)
+
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            raise HTTPException(status_code=HTTPStatus.CONFLICT,
+                                detail="Item already exists")
+        else:
+            raise Exception(e.response)
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
+    except Exception as e:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=e)
+    else:
+        return JSONResponse(status_code=HTTPStatus.CREATED,
+                            content={"inserted_id": new_class.id, "detail": "Item created successfully"})
+
+
+@registrar_router.delete("/classes/{class_id}")
+def delete_class(class_id: str, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Deletes a specific class.
 
     Parameters:
-    - `id` (int): The ID of the class to delete.
+    - `class_term_slug` (str): concatenated string of class term.
+    i.e class_term_slug = Fall-2023_CPSC-449
 
     Returns:
     - dict: A dictionary indicating the success of the deletion operation.
       Example: {"message": "Item deleted successfully"}
 
     Raises:
-    - HTTPException (404): If the class with the specified ID is not found.
-    - HTTPException (409): If there is a conflict in the delete operation.
+    - HTTPException (400): If invalid class_term_slug was passed.
+    - HTTPException (404): If the class with class_term_slug is not found.
     """
     try:
-        curr = db.execute("DELETE FROM class WHERE id=?;", [id])
-
-        if curr.rowcount == 0:
+        kwargs = {
+            "Key": {
+                "id": class_id
+            },
+            "ConditionExpression": "attribute_exists(id)",
+        }
+        dynamodb.delete_item(TableNames.CLASSES, kwargs)
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Record Not Found"
-            )
-        db.commit()
-    except sqlite3.IntegrityError as e:
+                status_code=HTTPStatus.NOT_FOUND, detail="Item Not Found")
+        else:
+            raise Exception(e.response)
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
+    else:
+        return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Item deleted successfully"})
 
-    return {"detail": "Item deleted successfully"}
 
-@registrar_router.patch("/classes/{id}", status_code=status.HTTP_200_OK)
-def update_class(
-    id: int,
-    body_data: ClassPatch,
-    response: Response,
-    db: sqlite3.Connection = Depends(get_db),
-):
+@registrar_router.patch("/classes/{class_id}", dependencies=[Depends(sync_user_account)])
+def update_class_instructor(class_info: ClassPatch, class_id: str, dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
-    Updates specific details of a class.
+    Updates instructor information for a class.
 
     Parameters:
-    - `class` (ClassPatch): The JSON object representing the class with the following properties:
-        - `section_no` (int, optional): Section number.
-        - `instructor_id` (int, optional): Instructor ID.
-        - `room_num` (int, optional): Room number.
-        - `room_capacity` (int, optional): Room capacity.
-        - `course_start_date` (str, optional): Course start date (format: "YYYY-MM-DD").
-        - `enrollment_start` (str, optional): Enrollment start date (format: "YYYY-MM-DD HH:MM:SS.SSS").
-        - `enrollment_end` (str, optional): Enrollment end date (format: "YYYY-MM-DD HH:MM:SS.SSS").
+    - `class_info` (ClassPatch): The JSON object representing the class with the following properties:
+        - `instructor_cwid` (int): Instructor ID.
 
     Returns:
     - dict: A dictionary indicating the success of the update operation.
       Example: {"message": "Item updated successfully"}
 
     Raises:
-    - HTTPException (404): If the class with the specified ID is not found.
-    - HTTPException (409): If there is a conflict in the update operation (e.g., duplicate class details).
+    - HTTPException (404): If the class with the specified ID, or instructor is not found.
     """
     try:
-        # Excluding fields that have not been set
-        data_fields = body_data.dict(exclude_unset=True)
+        kwargs = {
+            "Get": {
+                "TableName": TableNames.PERSONNEL,
+                "Key": {
+                    "cwid": class_info.instructor_cwid
+                }
+            }
+        }
+        responses = dynamodb.transact_get_items([kwargs])
 
-        # Create a list of column-placeholder pairs, separated by commas
-        keys = ", ".join(
-            [f"{key} = ?" for index, key in enumerate(data_fields.keys())]
-        )
+        if not responses[0] or not "Instructor" in responses[0]["Item"]["roles"]:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                                detail="instructor information not found")
 
-        # Create a list of values to bind to the placeholders
-        values = list(data_fields.values())  # List of values to be updated
-        values.append(id)  # WHERE id = ?
+        update_kwargs = {
+            "Key": {
+                "id": class_id
+            },
+            # check if the item already exists
+            "ConditionExpression": "attribute_exists(id)",
+            "UpdateExpression": "SET #instructor_id = :v1, #instructor_first_name = :v2, #instructor_last_name = :v3",
+            "ExpressionAttributeValues": {
+                ":v1": class_info.instructor_cwid,
+                ":v2": responses[0]["Item"]["first_name"],
+                ":v3": responses[0]["Item"]["last_name"]
+            },
+            "ExpressionAttributeNames": {
+                "#instructor_id": "instructor_id",
+                "#instructor_first_name": "instructor_first_name",
+                "#instructor_last_name": "instructor_last_name"
+            },
+            "ReturnValues": "UPDATED_NEW"
+        }
 
-        # Define a parameterized query with placeholders & values
-        update_query = f"UPDATE class SET {keys} WHERE id = ?"
-
-        # Execute the query
-        curr = db.execute(update_query, values)
-
-        # Raise exeption if Record not Found
-        if curr.rowcount == 0:
+        dynamodb.update_item(TableNames.CLASSES, update_kwargs)
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Record Not Found"
-            )
-        db.commit()
-    except sqlite3.Error as e:
+                status_code=HTTPStatus.NOT_FOUND, detail="Item Not Found")
+        else:
+            raise Exception(e.response)
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
+    except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
-    return {"message": "Item updated successfully"}
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
+    else:
+        return JSONResponse(status_code=HTTPStatus.OK, content={"message": "Item updated successfully"})

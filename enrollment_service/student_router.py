@@ -1,54 +1,53 @@
-from typing import Annotated
-import sqlite3
-from fastapi import Depends, HTTPException, Header, Body, status, APIRouter
-from .db_connection import get_db
-from .enrollment_helper import enroll_students_from_waitlist, is_auto_enroll_enabled
+from typing import Annotated, Any
+from http import HTTPStatus
+from fastapi import Depends, HTTPException, Header, Body, status, APIRouter, Request
+from fastapi.responses import JSONResponse
+from botocore.exceptions import ClientError
+from redis import Redis, RedisError
+from .dynamoclient import DynamoClient
+from .db_connection import get_redisdb, get_dynamodb, TableNames
+from .enrollment_helper import add_to_waitlist, drop_from_enrollment, enroll_students_from_waitlist, is_auto_enroll_enabled
+from .dependency_injection import sync_user_account
+from .models import ClassCreate
+from datetime import datetime
 
 WAITLIST_CAPACITY = 15
 MAX_NUMBER_OF_WAITLISTS_PER_STUDENT = 3
 
 student_router = APIRouter()
 
-@student_router.get("/classes/available/")
-def get_available_classes(db: sqlite3.Connection = Depends(get_db)):
-    """
-    Retreive all available classes.
 
-    Returns:
-    - dict: A dictionary containing the details of the classes
-    """
+@student_router.get("/classes/available/", dependencies=[Depends(sync_user_account)])
+def get_available_classes(dynamodb: DynamoClient = Depends(get_dynamodb)):
     try:
-        classes = db.execute(
-            """
-            SELECT c.*
-            FROM "class" as c
-            WHERE datetime('now') BETWEEN c.enrollment_start AND c.enrollment_end 
-                AND (
-                        (c.room_capacity > 
-                            (SELECT COUNT(enrollment.student_id)
-                            FROM enrollment
-                            WHERE class_id=c.id) > 0) 
-                        OR ((SELECT COUNT(waitlist.student_id)
-                            FROM waitlist
-                            WHERE class_id=c.id) < ?)
-                    );
-            """, [WAITLIST_CAPACITY]
-        )
-    except sqlite3.Error as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
-    finally:
-        return {"classes": classes.fetchall()}
+        # ---------------------------------------------------------------------
+        # Get the information of the class
+        # ---------------------------------------------------------------------
+        get_class_params = {
+            "IndexName": "available-index",
+            "KeyConditionExpression": "available = :value",
+            "ExpressionAttributeValues": {":value": "true"},
+        }
+        responses = dynamodb.query(TableNames.CLASSES, get_class_params)
+        response_json = responses["Items"]
 
-@student_router.post("/enrollment/")
-def enroll(class_id: Annotated[int, Body(embed=True)],
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=e)
+    else:
+        return response_json
+
+
+@student_router.post("/enrollment/", dependencies=[Depends(sync_user_account)], status_code=status.HTTP_201_CREATED)
+def enroll(class_id: Annotated[str, Body(embed=True)],
            student_id: int = Header(
                alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
            first_name: str = Header(alias="x-first-name"),
            last_name: str = Header(alias="x-last-name"),
-           db: sqlite3.Connection = Depends(get_db)):
+           redisdb: Redis = Depends(get_redisdb),
+           dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Student enrolls in a class
 
@@ -62,97 +61,167 @@ def enroll(class_id: Annotated[int, Body(embed=True)],
     Raises:
     - HTTPException (400): If there are no available seats.
     - HTTPException (404): If the specified class does not exist.
-    - HTTPException (409): If a conflict occurs (e.g., The student has already enrolled into the class).
+    - HTTPException (409): If one of these conflicts occurs:
+      - The student already enrolled in the class.
+      - The student is already on the waitlist.
+      - Database conflicts.
     - HTTPException (500): If there is an internal server error.
+    - HTTPException (503): If the waitlist is full. Unable to accept new entries at this time.
     """
-
     try:
-        class_info = db.execute(
-            """
-            SELECT id, course_start_date, enrollment_start, enrollment_end, datetime('now') AS datetime_now, 
-                    (room_capacity - COUNT(enrollment.class_id)) AS available_seats
-            FROM class LEFT JOIN enrollment ON class.id = enrollment.class_id 
-            WHERE class.id = ?;
-            """, [class_id]).fetchone()
+        # API Response data
+        response_json = {}
 
-        if not class_info["id"]:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Class Not Found")
+        # ---------------------------------------------------------------------
+        # Get the information of the class
+        # ---------------------------------------------------------------------
+        get_class_params = {
+            "Get": {
+                "TableName": TableNames.CLASSES,
+                "Key": {
+                    "id": class_id
+                }
+            }
+        }
+        responses = dynamodb.transact_get_items([get_class_params])
 
-        if not (class_info["enrollment_start"] <= class_info["datetime_now"] <= class_info["enrollment_end"]):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Not Available At The Moment")
+        if not responses[0]:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                                detail="Class Not Found")
 
-        # Insert student if not exists
-        db.execute(
-            """
-            INSERT OR IGNORE INTO student (id, first_name, last_name)
-            VALUES (?, ?, ?);
-            """, [student_id, first_name, last_name])
+        class_info = ClassCreate(**responses[0]["Item"])
 
-        if class_info["available_seats"] <= 0:
-            # CHECK THE WAITING LIST CONDITIONS
-            #   1. students may not be on more than 3 waiting lists
-            #   2. Waitlist capacity limit
+        # ---------------------------------------------------------------------
+        # Count the number of students enrolled in the class
+        # ---------------------------------------------------------------------
+        kwargs = {
+            "KeyConditionExpression": "class_id = :value",
+            "ExpressionAttributeValues": {":value": class_id},
+            "Select": "COUNT"
+        }
 
-            result = db.execute(
-                """
-                SELECT * 
-                FROM 
-                    (
-                        SELECT COUNT(class_id) AS num_waitlists_student_is_on 
-                        FROM waitlist 
-                        WHERE student_id = ?
-                    ), 
-                    (
-                        SELECT COUNT(student_id) AS num_students_on_this_waitlist 
-                        FROM waitlist 
-                        WHERE class_id = ?
-                    );
-                """, [student_id, class_id]).fetchone()
+        response = dynamodb.query(TableNames.ENROLLMENTS, kwargs)
 
-            if int(result["num_waitlists_student_is_on"]) >= MAX_NUMBER_OF_WAITLISTS_PER_STUDENT:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, 
-                    detail=f"Cannot exceed {MAX_NUMBER_OF_WAITLISTS_PER_STUDENT} waitlists limit")
-            
-            if int(result["num_students_on_this_waitlist"]) >= WAITLIST_CAPACITY:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail="No open seats and the waitlist is also full")
-            
-            # PASS THE CONDITIONS. LET'S ADD STUDENT TO WAITLIST
-            db.execute(
-                """
-                INSERT INTO waitlist(class_id, student_id, waitlist_date) 
-                VALUES(?, ?, datetime('now'))
-                """, [class_id, student_id]
-            )
+        num_students_enrolled = response["Count"]
+
+        # ---------------------------------------------------------------------
+        # If there is an open seat, enroll the student in the class
+        # ---------------------------------------------------------------------
+        if class_info.room_capacity > num_students_enrolled:
+
+            # After student enrolled in the class,
+            # If there will be NO open seats (Class will be full),
+            # Then, set available status to "false".
+            # Otherwise, "true"
+            available = "true" if class_info.room_capacity > num_students_enrolled + 1 else "false"
+
+            TransactItems = [
+                {
+                    "Put": {
+                        "TableName": TableNames.ENROLLMENTS,
+                        "Item": {
+                            "class_id": class_id,
+                            "student_cwid": student_id,
+                            "student_info": {
+                                "first_name": first_name,
+                                "last_name": last_name
+                            }
+                        },
+                        "ConditionExpression": "attribute_not_exists(class_id) AND attribute_not_exists(student_cwid)"
+                    }
+                },
+                {
+                    "Update": {
+                        "TableName": TableNames.CLASSES,
+                        "Key": {
+                            "id": class_id
+                        },
+                        "UpdateExpression": "SET available = :new_value",
+                        "ExpressionAttributeValues": {
+                            ":new_value": available
+                        }
+                    }
+                }
+            ]
+
+            dynamodb.transact_write_items(TransactItems)
+
+            response_json = JSONResponse(status_code=HTTPStatus.CREATED, content={
+                                         "detail": "Enrolled successfully"})
+
+        # ---------------------------------------------------------------------
+        # Else, Check & Add the student to the waitlist
+        # ---------------------------------------------------------------------
         else:
-            # ----- INSERT INTO ENROLLMENT TABLE -----
-            db.execute(
-                """
-                INSERT INTO enrollment(class_id, student_id, enrollment_date) 
-                VALUES(?, ?, datetime('now'))
-                """, [class_id, student_id]
-            )
+            # ***********************************************
+            # Check number of waitlists limit per student
+            # ***********************************************
+            kwargs = {"Key": {"cwid": student_id}}
+            response = dynamodb.get_item(TableNames.PERSONNEL, kwargs)
 
-        db.commit()
-    except sqlite3.IntegrityError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                            detail="The student has already enrolled into the class")
+            if "waitlists" in response["Item"] and MAX_NUMBER_OF_WAITLISTS_PER_STUDENT <= len(response["Item"]["waitlists"]):
+                raise HTTPException(status_code=HTTPStatus.CONFLICT,
+                                    detail="Exceed number of waitlists limit")
 
+            # ***********************************************
+            # Generate redis sorted set member name
+            # ***********************************************
+            new_member = f"{student_id}#{first_name}#{last_name}"
+
+            # ***********************************************
+            # Check if the student is already on the waitlist
+            # ***********************************************
+            rank = redisdb.zrank(class_id, new_member)
+
+            if rank is not None:
+                raise HTTPException(status_code=HTTPStatus.CONFLICT,
+                                    detail="Already on the waitlist")
+
+            # ***********************************************
+            # Check waitlist capacity
+            # ***********************************************
+            num_students_on_waitlist = redisdb.zcard(class_id)
+
+            if num_students_on_waitlist >= WAITLIST_CAPACITY:
+                raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                                    detail="Waitlist is full")
+
+            # ***********************************************
+            # OK. Checks passed. Place the student on waitlist
+            # ***********************************************
+            score = int(datetime.utcnow().timestamp())
+            add_to_waitlist(class_id, student_id, new_member, score)
+
+            # Return value
+            response_json = JSONResponse(status_code=HTTPStatus.CREATED,
+                                         content={"detail": "Successfully placed on the waitlist"})
+
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "TransactionCanceledException":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="Transaction Canceled")
+        elif e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="Already enrolled")
+        else:
+            raise Exception(e.response)
     except HTTPException as e:
         raise HTTPException(status_code=e.status_code, detail=str(e.detail))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=e)
+    else:
+        return response_json
+    finally:
+        redisdb.close()  # Close the Redis connection
 
-    return {"detail": "success"}
 
 @student_router.delete("/enrollment/{class_id}", status_code=status.HTTP_200_OK)
 def drop_class(
-    class_id: int,
-    student_id: int = Header(
-        alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
-    db: sqlite3.Connection = Depends(get_db)
-):
+        class_id: str,
+        student_id: int = Header(
+            alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
+        dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Handles a DELETE request to drop a student (himself/herself) from a specific class.
 
@@ -166,84 +235,53 @@ def drop_class(
     Raises:
     - HTTPException (409): If a conflict occurs
     """
-    try:
-        curr = db.execute(
-            "DELETE FROM enrollment WHERE class_id=? AND student_id=?", [class_id, student_id])
+    administrative = False
+    drop_from_enrollment(class_id, student_id, administrative, dynamodb)
 
-        if curr.rowcount == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Record Not Found"
-            )
-        
-        db.execute(
-            """
-            INSERT INTO droplist (class_id, student_id, drop_date, administrative) 
-            VALUES (?, ?, datetime('now'), 0);
-            """, [class_id, student_id]
-        )
-
-        db.commit()
-
-        # Trigger auto enrollment
-        if is_auto_enroll_enabled(db):        
-            enroll_students_from_waitlist(db, [class_id])
-
-    except sqlite3.IntegrityError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
-
-    return {"detail": "Item deleted successfully"}
 
 @student_router.get("/waitlist/{class_id}/position/")
 def get_current_waitlist_position(
-    class_id:int,
-    student_id: int = Header(
-        alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
-    db: sqlite3.Connection = Depends(get_db)):
+        class_id: str,
+        student_id: int = Header(
+            alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
+        first_name: str = Header(alias="x-first-name"),
+        last_name: str = Header(alias="x-last-name"),
+        redisdb: Redis = Depends(get_redisdb)):
     """
-    Retreive all available classes.
+    Retreive the position of the student on the waitlist.
 
     Returns:
-    - dict: A dictionary containing the details of the classes
+    - int: The position of the student on the waitlist
 
     Raises:
     - HTTPException (404): If record not found
     """
     try:
-        result = db.execute(
-            """
-            SELECT COUNT(student_id)
-            FROM waitlist
-            WHERE class_id=? AND 
-                waitlist_date <= (SELECT waitlist_date 
-                                    FROM waitlist
-                                    WHERE class_id=? AND 
-                                            student_id=?)
-            ;
-            """, [class_id, class_id, student_id]
-        ).fetchone()
+        # Get the rank of the member in the sorted set
+        member = f"{student_id}#{first_name}#{last_name}"
+        rank = redisdb.zrank(class_id, member)
 
-        if result[0] == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Record Not Found"
-            )
-        return {"position": result[0]}
-        
-    except sqlite3.Error as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
+        if rank is not None:
+            response_json = {"position": rank + 1}
+        else:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                                detail="Record Not Found")
+    except RedisError as e:
+        print(f"RedisError: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+    else:
+        return response_json
+    finally:
+        redisdb.close()  # Close the Redis connection
+
 
 @student_router.delete("/waitlist/{class_id}/", status_code=status.HTTP_200_OK)
 def remove_from_waitlist(
-    class_id: int,
-    student_id: int = Header(
-        alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
-    db: sqlite3.Connection = Depends(get_db)
-):
+        class_id: str,
+        student_id: int = Header(
+            alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
+        redisdb: Redis = Depends(get_redisdb)):
     """
     Students remove themselves from waitlist
 
@@ -258,18 +296,19 @@ def remove_from_waitlist(
     - HTTPException (409): If a conflict occurs
     """
     try:
-        curr = db.execute(
-            "DELETE FROM waitlist WHERE class_id=? AND student_id=?", [class_id, student_id])
+        # Get the rank of the member in the sorted set
+        deleted_count = redisdb.zrem(class_id, student_id)
 
-        if curr.rowcount == 0:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Record Not Found"
-            )
-
-    except sqlite3.IntegrityError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"type": type(e).__name__, "msg": str(e)},
-        )
-
-    return {"detail": "Item deleted successfully"}
+        if deleted_count > 0:
+            response_json = {"detail": "Item deleted successfully"}
+        else:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
+                                detail="Record Not Found")
+    except RedisError as e:
+        print(f"RedisError: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+    else:
+        return response_json
+    finally:
+        redisdb.close()  # Close the Redis connection

@@ -1,6 +1,7 @@
+import boto3
 import redis
+from redis import Redis
 from pydantic_settings import BaseSettings
-from .dynamoclient import DynamoClient
 
 
 class TableNames:
@@ -24,12 +25,15 @@ settings = Settings()
 def get_db():
     raise NotImplementedError
 
-
-def get_redisdb():
+def get_redisdb() -> Redis:
     return redis.Redis()
 
 def get_dynamodb():
-    return DynamoClient(settings.AWS_ACCESS_KEY_ID,
-                       settings.AWS_SECRET_ACCESS_KEY,
-                       settings.AWS_REGION_NAME,
-                       "http://localhost:8000")
+    db = boto3.resource(
+        "dynamodb",
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_REGION_NAME,
+        endpoint_url="http://localhost:8000"
+    )
+    return db
