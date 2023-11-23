@@ -2,7 +2,6 @@ from db_connection import get_dynamodb, TableNames
 
 
 def insert_courses():
-    table_name = TableNames.COURSES
     sample_data = [
         {"department_code": "CPSC", "course_no": 999, "title": "TEST 999"},
         {"department_code": "SOC", "course_no": 301, "title": "TEST 301"},
@@ -11,8 +10,6 @@ def insert_courses():
     dynamodb = get_dynamodb()
     for item in sample_data:
         dynamodb.Table(TableNames.COURSES).put_item(Item=item)
-
-    print(f"Table {table_name}: {len(sample_data)} items")
 
 def insert_personel():
     sample_data = [

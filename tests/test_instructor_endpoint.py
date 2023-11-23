@@ -1,8 +1,7 @@
-import os
 import unittest
 import requests
 from tests.helpers import *
-from tests.settings import BASE_URL, USER_DB_PATH, ENROLLMENT_DB_PATH
+from tests.settings import BASE_URL
 
 class CurrentEnrollmentTest(unittest.TestCase):
     def setUp(self):

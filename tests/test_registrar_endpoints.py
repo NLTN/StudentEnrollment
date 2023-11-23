@@ -2,7 +2,7 @@ import unittest
 import requests
 from tests.helpers import *
 from tests.settings import BASE_URL
-from db_connection import get_dynamodb, TableNames
+from tests.db_connection import get_dynamodb, TableNames
 from boto3.dynamodb.conditions import Key
 
 class AutoEnrollmentTest(unittest.TestCase):
