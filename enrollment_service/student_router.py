@@ -136,6 +136,22 @@ def enroll(class_id: Annotated[str, Body(embed=True)],
                             ":step_size": 1
                         }
                     }
+                },
+                {
+                    # TODO: refactoring needed
+                    # ***********************************************
+                    # UPDATE PERSONNEL `enrollments` attribute
+                    # ***********************************************
+                    "Update": {
+                        "TableName": TableNames.PERSONNEL,
+                        "Key": {
+                            "cwid": student_id
+                        },
+                        "UpdateExpression": "ADD enrollments :value",
+                        "ExpressionAttributeValues": {
+                            ":value": {class_id}
+                        },
+                    }
                 }
             ]
 
@@ -185,7 +201,7 @@ def enroll(class_id: Annotated[str, Body(embed=True)],
             # OK. Checks passed. Place the student on waitlist
             # ***********************************************
             score = int(datetime.utcnow().timestamp())
-            add_to_waitlist(class_id, student_id, new_member, score)
+            add_to_waitlist(class_id, class_info.title, student_id, new_member, score)
 
             # Return value
             response_json = JSONResponse(status_code=HTTPStatus.CREATED,

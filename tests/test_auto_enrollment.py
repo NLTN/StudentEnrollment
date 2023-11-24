@@ -26,6 +26,16 @@ class AutoEnrollmentTest(unittest.TestCase):
         # Student 2 enrolls
         response = enroll_class(class_id, users.student2.access_token)
 
+        # Student 3 enrolls
+        user_register(900003, "abc9898@csu.fullerton.edu", "1234", "Tom",
+                        "Miller", ["Student"])
+        access_token = user_login("abc9898@csu.fullerton.edu", password="1234")
+        response = enroll_class(class_id, access_token)
+
+
+        # BEFORE TEST: Get number of students on the waitlist before sending the request
+        rdb = get_redisdb()
+        count1 = rdb.zcard(class_id)
         # -------------------- Make API request --------------------
         headers = {
             "Content-Type": "application/json;",
@@ -36,13 +46,14 @@ class AutoEnrollmentTest(unittest.TestCase):
         url = f'{BASE_URL}/api/enrollment/{class_id}/'
         response = requests.delete(url, headers=headers)
 
+
+        # AFTER TEST: Get number of students on the waitlist after sending the request
+        count2 = rdb.zcard(class_id)
+
         # ------------------------- Assert -------------------------
         self.assertEqual(response.status_code, 200)
-
-        # Check if the waitlist is updated
-        rdb = get_redisdb()
-        members = rdb.zrange(class_id, 0, -1)
-        self.assertEqual(len(members), 0)
+        self.assertEqual(count1, 2)
+        self.assertEqual(count2, 1)
 
 if __name__ == '__main__':
     unittest.main()
