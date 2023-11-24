@@ -10,7 +10,7 @@ def is_auto_enroll_enabled(dynamodb: DynamoClient):
     Check if automatic enrollment is enabled
 
     Parameters:
-        db (sqlite3.Connection): Database connection.
+        dynamodb (DynamoClient): Database connection.
 
     Returns:
         bool: True if automatic enrollment is enabled. Otherwise, False.
@@ -18,30 +18,6 @@ def is_auto_enroll_enabled(dynamodb: DynamoClient):
     kwargs = {"Key": {"variable_name": "auto_enrollment_enabled"}}
     response = dynamodb.get_item(TableNames.CONFIGS, kwargs)
     return response["Item"]["value"] == True
-
-def get_available_classes_within_first_2weeks(db: sqlite3.Connection):
-    """
-    Get classes which have available seats
-
-    Parameters:
-        db (sqlite3.Connection): Database connection.
-
-    Returns:
-        list[int]: A list of class_id.
-    """
-
-    cursor = db.execute(
-        """
-        SELECT id 
-        FROM class 
-        WHERE course_start_date >= datetime('now', '-14 days')
-            AND room_capacity > (SELECT COUNT(student_id)
-                            FROM enrollment
-                            WHERE class_id = id
-                            )
-        """)
-    rows = cursor.fetchall()
-    return [row[0] for row in rows]
 
 def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
     """

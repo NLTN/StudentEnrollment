@@ -22,6 +22,39 @@ def insert_personel():
     for item in sample_data:
         dynamodb.Table(TableNames.PERSONNEL).put_item(Item=item)
 
+def insert_classes():
+    sample_data = [
+        {
+            "id": "2024.SU.CPSC.101.1",
+            "department_code": "CPSC",
+            "course_no": 101,
+            "section_no": 1,
+            "year": 2024,
+            "semester": "SU",
+            "title": "Intro to programming",
+            "instructor_id": 1,
+            "room_capacity": 30,
+            "available": "true"
+        },
+        {
+            "id": "2024.SP.CPSC.332.3",
+            "department_code": "CPSC",
+            "course_no": 332,
+            "section_no": 3,
+            "year": 2024,
+            "semester": "SP",
+            "title": "Databases",
+            "instructor_id": 2,
+            "room_capacity": 35,
+            "available": "true"
+        },
+    ]
+
+    dynamodb = get_dynamodb()
+    for item in sample_data:
+        dynamodb.Table(TableNames.CLASSES).put_item(Item=item)
+
 if __name__ == "__main__":
     insert_personel()
     insert_courses()
+    insert_classes()
