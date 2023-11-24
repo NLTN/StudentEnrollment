@@ -29,6 +29,7 @@ class ClassCreate(BaseModel):
     section_no: int
     year: int
     semester: str
+    title: str = None
     instructor_cwid: int
     room_capacity:int
     enrollment_count: int = 0

@@ -84,45 +84,63 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
             # ---------------------------------------------------------------------
             if num_open_seats > 0:
                 # ***********************************************
-                # Get the first n students from the waitlist
+                # Redis: Get the first n students from the waitlist
                 # ***********************************************
                 members = redisdb.zrange(class_id, 0, num_open_seats - 1)
                 student_id, first_name, last_name = members[0].decode('utf-8').split("#")
 
                 # ***********************************************
-                # Build a list of PutRequests 
+                # Dynamo DB: Build a list of transact items
                 # ***********************************************
-                enrollment_table_requests = []
+                transact_items = []
 
                 for m in members:
                     student_id, first_name, last_name = m.decode('utf-8').split("#")
-                    item = {
-                        "PutRequest": {
+                    student_id = int(student_id)
+
+                    transact_items.append({
+                        # ***********************************************
+                        # INSERT INTO enrollments table
+                        # ***********************************************
+                        "Put": {
+                            "TableName": TableNames.ENROLLMENTS,
                             "Item": {
-                                "class_id": class_id, 
-                                "student_cwid": int(student_id),
+                                "class_id": class_id,
+                                "student_cwid": student_id,
                                 "student_info": {
                                     "first_name": first_name,
                                     "last_name": last_name
                                 }
-                            }
-                        }                        
-                    }
-                    enrollment_table_requests.append(item)
+                            },
+                            "ConditionExpression": "attribute_not_exists(class_id) AND attribute_not_exists(student_cwid)"
+                        }
+                    })
+                    
+                    transact_items.append({
+                        # ***********************************************
+                        # UPDATE PERSONNEL `enrollments` & waitlists attributes
+                        # ***********************************************
+                        "Update": {
+                            "TableName": TableNames.PERSONNEL,
+                            "Key": {
+                                "cwid": student_id
+                            },
+                            "UpdateExpression": "ADD enrollments :value \
+                                                 DELETE waitlists :value",
+                            "ExpressionAttributeValues": {
+                                ":value": {class_id}
+                            },
+                        }
+                    })
 
                 # ***********************************************
-                # BATCH INSERT INTO enrollments
+                # Perform transact_write_items operation
                 # ***********************************************
-                batch_write_request = {
-                    'RequestItems': {TableNames.ENROLLMENTS: enrollment_table_requests}
-                }
-                
-                # Perform the batch write operation
-                dynamodb.batch_write_item(batch_write_request)
+                dynamodb.transact_write_items(transact_items)
             
                 # ***********************************************
-                # Delete those students from the waitlist 
-                # because they enrolled successfully
+                # Redis: Delete those students from the waitlist 
+                #        because they enrolled successfully
                 # ***********************************************
                 redisdb.zremrangebyrank(class_id, 0, num_open_seats - 1)
 
@@ -140,7 +158,7 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
     return num_students_enrolled
 
 
-def add_to_waitlist(class_id, student_id, member_name: str, score: int):
+def add_to_waitlist(class_id, class_title: str, student_id, member_name: str, score: int):
     try:
         redisdb = get_redisdb()
         dynamodb = get_dynamodb()
@@ -148,16 +166,17 @@ def add_to_waitlist(class_id, student_id, member_name: str, score: int):
         # Insert into Redis DB
         redisdb.zadd(class_id, {member_name: score})
 
-        # Update Personnel table: add class_id to waitlist attribute
+        # ***********************************************
+        # UPDATE PERSONNEL `enrollments` attribute
+        # ***********************************************
         update_kwargs = {
             "Key": {
                 "cwid": student_id
             },
             "ConditionExpression": "attribute_exists(cwid)",
-            "UpdateExpression": "SET waitlists = list_append(if_not_exists(waitlists, :empty_list), :new_item)",
+            "UpdateExpression": "ADD waitlists :value",
             "ExpressionAttributeValues": {
-                ":new_item": [class_id],
-                ':empty_list': []
+                ":value": {class_id}
             },
             "ReturnValues": "UPDATED_NEW"
         }
@@ -213,6 +232,21 @@ def drop_from_enrollment(class_id, student_id, administrative: bool, dynamodb: D
                         ":zero": 0
                     }
                 }
+            },
+            {
+                # ***********************************************
+                # UPDATE PERSONNEL `enrollments` attribute
+                # ***********************************************
+                "Update": {
+                    "TableName": TableNames.PERSONNEL,
+                    "Key": {
+                        "cwid": student_id
+                    },
+                    "UpdateExpression": "DELETE enrollments :value",
+                    "ExpressionAttributeValues": {
+                        ":value": {class_id}
+                    }
+                }
             }
         ]
 
@@ -221,7 +255,6 @@ def drop_from_enrollment(class_id, student_id, administrative: bool, dynamodb: D
         # ---------------------------------------------------------------------
         # Trigger auto enrollment
         # ---------------------------------------------------------------------
-        # TODO: Call the function auto_enrollment_from_waitlist()
         if is_auto_enroll_enabled(dynamodb):
             enroll_students_from_waitlist([class_id], dynamodb)
 
