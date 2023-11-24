@@ -35,7 +35,7 @@ class ClassTest(unittest.TestCase):
 
         # ------------------------- Assert -------------------------
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(len(response.json()), 2)
 
 class EnrollmentTest(unittest.TestCase):
     def setUp(self):

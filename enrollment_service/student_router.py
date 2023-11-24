@@ -18,10 +18,11 @@ student_router = APIRouter()
 
 
 @student_router.get("/classes/available/", dependencies=[Depends(sync_user_account)])
-def get_available_classes(dynamodb: DynamoClient = Depends(get_dynamodb)):
+def get_available_classes(student_id: int = Header(alias="x-cwid"), 
+                          dynamodb: DynamoClient = Depends(get_dynamodb)):
     try:
         # ---------------------------------------------------------------------
-        # Get the information of the class
+        # Get all the classes that have open seats
         # ---------------------------------------------------------------------
         get_class_params = {
             "IndexName": "available-index",
@@ -29,7 +30,29 @@ def get_available_classes(dynamodb: DynamoClient = Depends(get_dynamodb)):
             "ExpressionAttributeValues": {":value": "true"},
         }
         responses = dynamodb.query(TableNames.CLASSES, get_class_params)
-        response_json = responses["Items"]
+        available_classes = responses["Items"]
+
+
+        # ---------------------------------------------------------------------
+        # Get all the classes the student enrolled / waitlisted
+        # ---------------------------------------------------------------------
+        kwargs = {"Key": {"cwid": student_id}}
+        response = dynamodb.get_item(TableNames.PERSONNEL, kwargs)
+
+        my_classes = []
+        
+        if "enrollments" in response["Item"]:
+            my_classes.extend(list(response["Item"]["enrollments"]))
+
+        if "waitlists" in response["Item"]:
+            my_classes.extend(list(response["Item"]["waitlists"]))
+
+
+        # ---------------------------------------------------------------------
+        # Available classes for this student. result = available_classes - enrollments - waitlists
+        # ---------------------------------------------------------------------
+        for item in my_classes:
+            available_classes = [e for e in available_classes if e['id'] != item]
 
     except HTTPException as e:
         raise HTTPException(status_code=e.status_code, detail=str(e.detail))
@@ -37,7 +60,7 @@ def get_available_classes(dynamodb: DynamoClient = Depends(get_dynamodb)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail=e)
     else:
-        return response_json
+        return available_classes
 
 
 @student_router.post("/enrollment/", dependencies=[Depends(sync_user_account)], status_code=status.HTTP_201_CREATED)
@@ -292,7 +315,8 @@ def remove_from_waitlist(
         class_id: str,
         student_id: int = Header(
             alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
-        redisdb: Redis = Depends(get_redisdb)):
+        redisdb: Redis = Depends(get_redisdb),
+        dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Students remove themselves from waitlist
 
@@ -311,6 +335,23 @@ def remove_from_waitlist(
         deleted_count = redisdb.zrem(class_id, student_id)
 
         if deleted_count > 0:
+            # ***********************************************
+            # UPDATE PERSONNEL waitlists attributes
+            # ***********************************************
+            kwargs = {
+                "Key": {
+                    "cwid": student_id
+                },
+                "ConditionExpression": "attribute_exists(cwid)",
+                "UpdateExpression": "DELETE waitlists :value",
+                "ExpressionAttributeValues": {
+                    ":value": {class_id}
+                },
+                "ReturnValues": "UPDATED_NEW"
+            }
+
+            dynamodb.update_item(TableNames.PERSONNEL, kwargs)
+
             response_json = {"detail": "Item deleted successfully"}
         else:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
