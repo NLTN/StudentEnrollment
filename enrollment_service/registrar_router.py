@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from botocore.exceptions import ClientError
 from .dynamoclient import DynamoClient
 from .db_connection import get_dynamodb, TableNames
+from .enrollment_helper import get_all_available_classes, enroll_students_from_waitlist
 from .dependency_injection import sync_user_account
 from .models import Course, ClassCreate, ClassPatch, Config
 
@@ -17,12 +18,7 @@ def set_auto_enrollment(config: Config, dynamodb: DynamoClient = Depends(get_dyn
     Endpoint for enabling/disabling automatic enrollment.
 
     Parameters:
-    - semester (str): term's semester
-    - year (int) : term's year 
     - auto_enrollment_enabled (bool): A boolean indicating whether automatic enrollment should be enabled or disabled.
-
-    Raises:
-    - HTTPException (404): If the enrollment period is not found.
 
     Returns:
         dict: A dictionary containing a detail message confirming the status of auto enrollment.
@@ -35,9 +31,18 @@ def set_auto_enrollment(config: Config, dynamodb: DynamoClient = Depends(get_dyn
             }
         }
         dynamodb.put_item(TableNames.CONFIGS, kwargs)
+
+        if config.auto_enrollment_enabled:
+            # ***********************************************
+            # Perform auto enrollment from waitlists
+            # ***********************************************
+            available_classes = get_all_available_classes(dynamodb)
+            class_id_list = [e["id"] for e in available_classes]
+            enroll_students_from_waitlist(class_id_list, dynamodb)
+
     except Exception as e:
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="INTERNAL SERVER ERROR")
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
     else:
         return {"detail": "success"}
 
@@ -136,7 +141,7 @@ def create_class(new_class: ClassCreate, dynamodb: DynamoClient = Depends(get_dy
         if not responses[1] or not "Instructor" in responses[1]["Item"]["roles"]:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
                                 detail="Instructor not found")
-        
+
         # ---------------------------------------------------------------------
         # Insert into DB
         # ---------------------------------------------------------------------

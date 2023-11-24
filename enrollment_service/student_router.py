@@ -6,7 +6,7 @@ from botocore.exceptions import ClientError
 from redis import Redis, RedisError
 from .dynamoclient import DynamoClient
 from .db_connection import get_redisdb, get_dynamodb, TableNames
-from .enrollment_helper import add_to_waitlist, drop_from_enrollment, enroll_students_from_waitlist, is_auto_enroll_enabled
+from .enrollment_helper import add_to_waitlist, drop_from_enrollment, get_all_available_classes
 from .dependency_injection import sync_user_account
 from .models import ClassCreate
 from datetime import datetime
@@ -24,17 +24,11 @@ def get_available_classes(student_id: int = Header(alias="x-cwid"),
         # ---------------------------------------------------------------------
         # Get all the classes that have open seats
         # ---------------------------------------------------------------------
-        get_class_params = {
-            "IndexName": "available-index",
-            "KeyConditionExpression": "available = :value",
-            "ExpressionAttributeValues": {":value": "true"},
-        }
-        responses = dynamodb.query(TableNames.CLASSES, get_class_params)
-        available_classes = responses["Items"]
-
+        available_classes = get_all_available_classes(dynamodb)
+        
 
         # ---------------------------------------------------------------------
-        # Get all the classes the student enrolled / waitlisted
+        # Retrieves all the classes that the student is enrolled or waitlisted
         # ---------------------------------------------------------------------
         kwargs = {"Key": {"cwid": student_id}}
         response = dynamodb.get_item(TableNames.PERSONNEL, kwargs)
@@ -49,7 +43,10 @@ def get_available_classes(student_id: int = Header(alias="x-cwid"),
 
 
         # ---------------------------------------------------------------------
-        # Available classes for this student. result = available_classes - enrollments - waitlists
+        # Get the available classes for this_student by filtering out
+        # the classes that the student is enrolled or waitlisted
+        #
+        # available_classes_for_this_student = available_classes - enrollments - waitlists
         # ---------------------------------------------------------------------
         for item in my_classes:
             available_classes = [e for e in available_classes if e['id'] != item]
