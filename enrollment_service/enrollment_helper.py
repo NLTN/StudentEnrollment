@@ -1,9 +1,9 @@
-import sqlite3
 from http import HTTPStatus
 from fastapi import HTTPException, status
 from botocore.exceptions import ClientError
 from .dynamoclient import DynamoClient
 from .db_connection import get_dynamodb, get_redisdb, TableNames
+
 
 def is_auto_enroll_enabled(dynamodb: DynamoClient):
     """
@@ -19,6 +19,7 @@ def is_auto_enroll_enabled(dynamodb: DynamoClient):
     response = dynamodb.get_item(TableNames.CONFIGS, kwargs)
     return response["Item"]["value"] == True
 
+
 def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
     """
     This function checks the waitlist for available spots in the classes
@@ -30,9 +31,9 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
     Returns:
         int: The number of success enrollments.
     """
-    
+
     num_students_enrolled = 0
-    
+
     try:
         redisdb = get_redisdb()
 
@@ -42,7 +43,7 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
             # ---------------------------------------------------------------------
             kwargs = {"Key": {"id": class_id}}
             response = dynamodb.get_item(TableNames.CLASSES, kwargs)
-            
+
             if "room_capacity" in response["Item"]:
                 room_capacity = int(response["Item"]["room_capacity"])
             else:
@@ -63,7 +64,6 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
                 # Redis: Get the first n students from the waitlist
                 # ***********************************************
                 members = redisdb.zrange(class_id, 0, num_open_seats - 1)
-                student_id, first_name, last_name = members[0].decode('utf-8').split("#")
 
                 # ***********************************************
                 # Dynamo DB: Build a list of transact items
@@ -71,7 +71,8 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
                 transact_items = []
 
                 for m in members:
-                    student_id, first_name, last_name = m.decode('utf-8').split("#")
+                    student_id, first_name, last_name = m.decode(
+                        'utf-8').split("#")
                     student_id = int(student_id)
 
                     transact_items.append({
@@ -91,7 +92,7 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
                             "ConditionExpression": "attribute_not_exists(class_id) AND attribute_not_exists(student_cwid)"
                         }
                     })
-                    
+
                     transact_items.append({
                         # ***********************************************
                         # UPDATE PERSONNEL `enrollments` & waitlists attributes
@@ -110,28 +111,52 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
                     })
 
                 # ***********************************************
-                # Perform transact_write_items operation
+                # Perform updating data in DynamoDB & Redis
                 # ***********************************************
-                dynamodb.transact_write_items(transact_items)
-            
-                # ***********************************************
-                # Redis: Delete those students from the waitlist 
-                #        because they enrolled successfully
-                # ***********************************************
-                redisdb.zremrangebyrank(class_id, 0, num_open_seats - 1)
+                if transact_items:
+                    # Dynamo DB: Perform transact_write_items operation
+                    dynamodb.transact_write_items(transact_items)
 
+                    # Redis: Delete those students from the waitlist
+                    #        because they enrolled successfully
+                    redisdb.zremrangebyrank(class_id, 0, num_open_seats - 1)
 
-                # ***********************************************
-                # Update the counter
-                # ***********************************************
-                num_students_enrolled += num_open_seats
+                    # Update the counter
+                    num_students_enrolled += num_open_seats
 
     except Exception as e:
         print(e)
     finally:
         redisdb.close()  # Close the Redis connection
-    
+
     return num_students_enrolled
+
+
+def get_all_available_classes(dynamodb: DynamoClient):
+    """
+    Retrieves a list of available classes. The definition of an "available class" is one that has open seats.
+
+    Parameters:
+    - dynamodb (DynamoClient): An instance of the DynamoClient class representing the connection to DynamoDB.
+
+    Returns:
+    - List[Dict[str, Any]]: A list of dictionaries, where each dictionary represents an available class.
+      Each dictionary contains information about the class.
+
+    Raises:
+    - botocore.exceptions.ClientError: If there is an error in the DynamoDB query.
+    """
+    try:
+        get_class_params = {
+            "IndexName": "available-index",
+            "KeyConditionExpression": "available = :value",
+            "ExpressionAttributeValues": {":value": "true"},
+        }
+        responses = dynamodb.query(TableNames.CLASSES, get_class_params)
+    except:
+        raise
+    else:
+        return responses["Items"]
 
 
 def add_to_waitlist(class_id, class_title: str, student_id, member_name: str, score: int):
@@ -161,6 +186,7 @@ def add_to_waitlist(class_id, class_title: str, student_id, member_name: str, sc
 
     except Exception as e:
         raise Exception(f"AddToWaitlistFailed: {e}")
+
 
 def drop_from_enrollment(class_id, student_id, administrative: bool, dynamodb: DynamoClient):
     try:
