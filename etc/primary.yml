@@ -47,4 +47,4 @@ lease:
   candidate: true
 
 
-exec: "uvicorn --port $PORT login_service.login_service:app --reload"
+exec: "uvicorn --port $PORT user_service.app:app --host 0.0.0.0 --reload"

@@ -13,7 +13,7 @@ import hashlib
 import base64
 
 from fastapi import FastAPI, Depends, Response, HTTPException, status, Path
-from .db_connection import get_db
+from .db_connection import get_db, get_db_replicas
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 
@@ -115,11 +115,11 @@ def register_new_user(usermodel: UserRegisterModel, db: sqlite3.Connection = Dep
                             detail="Conflicts")
     except Exception as e:
         #logger.exception("An error occurred during user registration")
-        raise HTTPException(status_code=500, detail="User registration failed")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Operation/Resource 14
 @app.post("/login/", description="User Login")
-def login(logindata: UserLoginModel, db: sqlite3.Connection = Depends(get_db)):
+def login(logindata: UserLoginModel, db: sqlite3.Connection = Depends(get_db_replicas)):
     try:
         cursor = db.cursor()
         cursor.execute("SELECT id, hashed_password, first_name, last_name FROM user WHERE username=? LIMIT 1", [logindata.username])
