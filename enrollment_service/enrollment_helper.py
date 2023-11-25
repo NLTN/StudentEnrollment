@@ -190,6 +190,20 @@ def add_to_waitlist(class_id, class_title: str, student_id, member_name: str, sc
 
 def drop_from_enrollment(class_id, student_id, administrative: bool, dynamodb: DynamoClient):
     try:
+        # ***********************************************
+        # Get student info
+        # ***********************************************
+        kwargs = {"Key": {"cwid": student_id}}
+        response = dynamodb.get_item(TableNames.PERSONNEL, kwargs)
+
+        if "Item" not in response:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                    detail="Student Not Found")
+        
+        first_name = response["Item"]["first_name"]
+        last_name = response["Item"]["last_name"]
+
+        # Build transact items
         TransactItems = [
             {
                 # ***********************************************
@@ -213,6 +227,10 @@ def drop_from_enrollment(class_id, student_id, administrative: bool, dynamodb: D
                     "Item": {
                         "class_id": class_id,
                         "student_cwid": student_id,
+                        "student_info": {
+                            "first_name": first_name,
+                            "last_name": last_name
+                        },
                         "administrative": administrative
                     }
                 }
