@@ -7,7 +7,7 @@ def sync_user_account(
         cwid: int = Header(alias="x-cwid"),
         first_name: str = Header(alias="x-first-name"),
         last_name: str = Header(alias="x-last-name"),
-        roles: str = Header(alias="x-roles"),
+        roles: list[str] = Header(alias="x-roles"),
         dynamodb: DynamoClient = Depends(get_dynamodb)):
     """
     Synchronizes user account information to a DynamoDB table.
@@ -43,12 +43,14 @@ def sync_user_account(
                     "cwid": cwid,
                     "first_name": first_name,
                     "last_name": last_name,
-                    "roles": roles.split(",")
+                    "roles": roles
                 }
             }
             dynamodb.put_item(TableNames.PERSONNEL, kwargs)
 
-        elif response["Item"]["first_name"] != first_name and response["Item"]["last_name"] != last_name:
+        elif response["Item"]["first_name"] != first_name \
+                or response["Item"]["last_name"] != last_name \
+                or response["Item"]["roles"] != roles:
             # ***********************************************
             # Data changes dectected. UPDATE data
             # ***********************************************
