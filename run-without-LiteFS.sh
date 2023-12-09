@@ -24,4 +24,4 @@ sed -i "s|^$VARIABLE_NAME=.*$|$VARIABLE_NAME=$NEW_VALUE|" "$ENV_FILE"
 python3 ./bin/watchdog.py &
 
 # Start the services
-foreman start -m gateway=1,enrollment_service=3,user_service=1,dynamodb=1,redis=1,webhook=1
+foreman start -m gateway=1,enrollment_service=3,user_service=1,dynamodb=1,redis=1,rabbitmq=1,webhook=1

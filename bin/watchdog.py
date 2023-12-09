@@ -61,9 +61,9 @@ def wait_for_service(host, port, timeout=60):
 if __name__ == "__main__":
     print("Watchdog: Started")
 
-    result = wait_for_service("localhost", 8000)
+    is_dynamodb_running = wait_for_service("localhost", 8000)
 
-    if result:
+    if is_dynamodb_running:
         if not os.path.exists(settings.USER_SERVICE_PRIMARY_DB_PATH):
             print("Watchdog: Creating user database")
             os.system("sh ./bin/create-user-db.sh")
@@ -71,7 +71,12 @@ if __name__ == "__main__":
             print("Watchdog: Creating Enrollment database")
         else:
             print("Watchdog: Detected user database already exists")
-
-        print("Watchdog: Done")
     else:
         print("Watchdog: Service could not be detected within the specified timeout.")
+
+    # RabbitMQ
+    is_rabbitmq_running = wait_for_service("localhost", 5672)
+
+    if is_dynamodb_running and is_rabbitmq_running:
+        print("Watchdog: RabbitMQ and DynamoDB are up and running")
+        print("Watchdog: Done")
