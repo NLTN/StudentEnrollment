@@ -32,6 +32,9 @@ fi
 # Update package lists
 sudo apt update
 
+# Install cURL (Client URL)
+sudo apt install -y curl
+
 # Install KrakenD
 sudo apt install -y krakend
 
@@ -119,6 +122,46 @@ fi
 # Clean up
 rm $DYNAMODB_LIBRARY_PATH/dynamodbv2.tar.gz
 
+# ------------------------------------- END -------------------------------------
+
+
+# *******************************************************************************
+# **************************** Block to download LiteFS *************************
+# *******************************************************************************
+# Get the directory where this Bash script is located
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+
+# Download LiteFS if not exists
+if [ ! -f "$SCRIPT_DIR/litefs" ]; then    
+    curl -L "https://github.com/superfly/litefs/releases/download/v0.5.10/litefs-v0.5.10-linux-amd64.tar.gz" | \
+        tar zx -C "$SCRIPT_DIR/"
+    echo "LiteFS has been downloaded"
+else
+    echo "LiteFS already exists. No need to download"
+fi
+# ------------------------------------- END -------------------------------------
+
+
+# *******************************************************************************
+# ********************* Block to install NodeJS & Smee-Client *******************
+# *******************************************************************************
+# Installs N, the Node.js version manager, on Unix-like platforms, 
+# without needing to install Node.js first.
+if [ ! -d "$HOME/n" ]; then
+    curl -s -L http://git.io/n-install | bash -s -- -y
+fi
+
+# Install the latest Node.js version
+"$HOME/n/bin/n" latest
+
+# Update to the latest version of the NPM package manager
+sudo npm update --global
+
+# Install smee-client
+sudo npm install --global smee-client
+
+# Install dependencies for webhook service
+# npm install -C ./webhooks
 # ------------------------------------- END -------------------------------------
 
 

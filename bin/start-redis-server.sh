@@ -1,3 +1,4 @@
 #!/bin/bash
-sudo systemctl stop redis-server.service
+
+sudo pkill redis-server
 redis-server ./etc/redis.conf

@@ -41,3 +41,4 @@ insert_if_not_exists "DYNAMODB_DATABASE_PATH" '"./var"'
 insert_if_not_exists "AWS_ACCESS_KEY_ID" '"enrollment"'
 insert_if_not_exists "AWS_SECRET_ACCESS_KEY" '"123456"'
 insert_if_not_exists "AWS_REGION_NAME" '"local"'
+insert_if_not_exists "ENABLE_USER_DB_REPLICATION" true	# Using LiteFS to replicate User DB
