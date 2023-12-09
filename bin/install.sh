@@ -166,19 +166,11 @@ sudo npm install --global smee-client
 
 
 # *******************************************************************************
-# ************************** Block to install RabbitMQ **************************
-# *******************************************************************************
-# Install RabbitMQ
-sudo apt install -y rabbitmq-server
-
-# Prevent RabbitMQ from starting automatically at boot
-sudo systemctl disable rabbitmq-server
-# ------------------------------------- END -------------------------------------
-
-
-# *******************************************************************************
 # ************************* Block to install other stuff ************************
 # *******************************************************************************
+
+# Install RabbitMQ
+sudo apt install -y rabbitmq-server
 
 # Install Redis 
 sudo apt install -y redis
