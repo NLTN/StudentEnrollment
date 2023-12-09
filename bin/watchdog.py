@@ -80,3 +80,5 @@ if __name__ == "__main__":
     if is_dynamodb_running and is_rabbitmq_running:
         print("Watchdog: RabbitMQ and DynamoDB are up and running")
         print("Watchdog: Done")
+    else:
+        print("Watchdog: RabbitMQ and/or DynamoDB could not be detected within the specified timeout.")
