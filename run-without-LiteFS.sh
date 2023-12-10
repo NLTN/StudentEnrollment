@@ -13,7 +13,7 @@ export $(grep -v '^#' $ENV_FILE | xargs)
 
 # Define the variable name and the new value
 VARIABLE_NAME="ENABLE_USER_DB_REPLICATION"
-NEW_VALUE=true
+NEW_VALUE=false
 
 # Update the variable in the .env file
 sed -i "s|^$VARIABLE_NAME=.*$|$VARIABLE_NAME=$NEW_VALUE|" "$ENV_FILE"
@@ -24,4 +24,4 @@ sed -i "s|^$VARIABLE_NAME=.*$|$VARIABLE_NAME=$NEW_VALUE|" "$ENV_FILE"
 python3 ./bin/watchdog.py &
 
 # Start the services
-foreman start -m gateway=1,enrollment_service=3,user_service_primary=1,user_service_secondary=1,user_service_tertiary=1,dynamodb=1,redis=1,webhook=1,webhook_dispatcher=1,mail_dispatcher=1
+foreman start -m gateway=1,enrollment_service=3,user_service=1,dynamodb=1,redis=1,webhook=1,webhook_dispatcher=1,mail_dispatcher=1
