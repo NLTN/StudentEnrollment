@@ -19,6 +19,9 @@ NEW_VALUE=true
 sed -i "s|^$VARIABLE_NAME=.*$|$VARIABLE_NAME=$NEW_VALUE|" "$ENV_FILE"
 # ------------------------------------- END -------------------------------------
 
+# Start the service if not running
+sudo rabbitmq-server -detached
+
 # Start Watchdog to detect the services are already running 
 # and create databases (if needed).
 python3 ./bin/watchdog.py &
