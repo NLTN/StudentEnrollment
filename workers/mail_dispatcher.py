@@ -1,7 +1,6 @@
 import pika
-import sys
-import os
 import logging
+from helper import wait_for_service
 
 # Logger
 logging.basicConfig(filename=f'mail_dispatcher.log', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -29,11 +28,12 @@ def dispatcher():
 
 if __name__ == '__main__':
     try:
+        is_rabbitmq_running = wait_for_service(host="localhost", port=5672, timeout=60)
+
+        if not is_rabbitmq_running:
+            raise Exception("RabbitMQ Not Running")
+        
+        # Start dispatcher
         dispatcher()
     except Exception as e:
-        print('Interrupted')
-        print(str(e))
-        try:
-            sys.exit(0)
-        except SystemExit:
-            os._exit(0)
+        print('Interrupted', e)
