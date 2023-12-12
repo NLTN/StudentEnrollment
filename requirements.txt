@@ -6,4 +6,5 @@ jwcrypto==1.5.0
 requests
 boto3
 redis
+aioredis 
 pika #RabbitMQ client library
