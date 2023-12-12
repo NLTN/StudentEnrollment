@@ -246,5 +246,135 @@ class WaitlistTest(unittest.TestCase):
         # ------------------------- Assert -------------------------
         self.assertEqual(response.status_code, 200)
 
+
+class NotificationSubscriptionTest(unittest.TestCase):
+    def setUp(self):
+        unittest_setUp()
+
+    def tearDown(self):
+        unittest_tearDown()
+
+    # TODO: Need to double check if data exists in RedisDB
+    def test_subscribe_email_only(self):
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
+
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 1, users.registrar.access_token)
+        class_id = response.json()["inserted_id"]
+
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
+
+        # -------------------- Make API request --------------------
+        headers = {
+            "Content-Type": "application/json;",
+            "Authorization": f"Bearer {users.student1.access_token}"
+        }
+        body = {
+            "class_id": class_id,
+            "email": "john@fullerton.edu"
+        }
+
+        # Send request
+        url = f'{BASE_URL}/api/subscribe/'
+        response = requests.post(url, headers=headers, json=body)
+
+        # ------------------------- Assert -------------------------
+        self.assertEqual(response.status_code, 201)
+
+    # TODO: Need to double check if data exists in RedisDB
+    def test_subscribe_webhook_only(self):
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
+
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 1, users.registrar.access_token)
+        class_id = response.json()["inserted_id"]
+
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
+
+        # -------------------- Make API request --------------------
+        headers = {
+            "Content-Type": "application/json;",
+            "Authorization": f"Bearer {users.student1.access_token}"
+        }
+        body = {
+            "class_id": class_id,
+            "webhook_url": "https://smee.io/CGPVZmrhO5f7v7w"
+        }
+
+        # Send request
+        url = f'{BASE_URL}/api/subscribe/'
+        response = requests.post(url, headers=headers, json=body)
+
+        # ------------------------- Assert -------------------------
+        self.assertEqual(response.status_code, 201)
+
+    # TODO: Need to double check if data exists in RedisDB
+    def test_subscribe_email_and_webhook(self):
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
+
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 1, users.registrar.access_token)
+        class_id = response.json()["inserted_id"]
+
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
+
+        # -------------------- Make API request --------------------
+        headers = {
+            "Content-Type": "application/json;",
+            "Authorization": f"Bearer {users.student1.access_token}"
+        }
+        body = {
+            "class_id": class_id,
+            "email": "john@fullerton.edu",
+            "webhook_url": "https://smee.io/CGPVZmrhO5f7v7w"
+        }
+
+        # Send request
+        url = f'{BASE_URL}/api/subscribe/'
+        response = requests.post(url, headers=headers, json=body)
+
+        # ------------------------- Assert -------------------------
+        self.assertEqual(response.status_code, 201)
+
+    # TODO: Need to double check if data exists in RedisDB
+    def test_subscribe_wrong_class(self):
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
+
+        # Wrong class id
+        class_id = "This_Is_A_Wrong_Class_ID"
+
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
+
+        # -------------------- Make API request --------------------
+        headers = {
+            "Content-Type": "application/json;",
+            "Authorization": f"Bearer {users.student1.access_token}"
+        }
+        body = {
+            "class_id": class_id,
+            "email": "john@fullerton.edu",
+            "webhook_url": "https://smee.io/CGPVZmrhO5f7v7w"
+        }
+
+        # Send request
+        url = f'{BASE_URL}/api/subscribe/'
+        response = requests.post(url, headers=headers, json=body)
+
+        # ------------------------- Assert -------------------------
+        self.assertEqual(response.status_code, 201)
+
+        
 if __name__ == '__main__':
     unittest.main()
