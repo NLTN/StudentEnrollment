@@ -1,6 +1,8 @@
 from typing import Optional
+from typing import List
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
+
 # import logging.config
 
 class Settings(BaseSettings, env_file=".env", extra="ignore"):
@@ -42,3 +44,13 @@ class Course(BaseModel):
     department_code: str
     course_no: int
     title: str
+
+#update model here for subscription 
+class Subscription(BaseModel):
+    user_id: str
+    course_id: str
+    email: str = ""
+    webhook_url: str = ""
+
+class SubscriptionsList(BaseModel):
+    subscriptions: List[Subscription]

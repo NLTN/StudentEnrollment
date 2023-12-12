@@ -11,6 +11,17 @@ from .dependency_injection import sync_user_account
 from .models import ClassCreate
 from datetime import datetime
 
+
+#add modules for enrollment notifications
+
+
+from enrollment_service.models import Subscription
+from enrollment_service.dependency_injection import get_redis_client
+from enrollment_service.enrollment_helper import notify_enrollment
+from enrollment_service.workers.rabbitmq_producer import send_enrollment_notification
+from .enrollment_helper import notify_enrollment
+from .models import Subscription 
+
 WAITLIST_CAPACITY = 15
 MAX_NUMBER_OF_WAITLISTS_PER_STUDENT = 3
 
@@ -58,6 +69,33 @@ def get_available_classes(student_id: int = Header(alias="x-cwid"),
                             detail=e)
     else:
         return available_classes
+
+
+@student_router.post("/subscribe")
+async def subscribe_to_notifications(subscription: Subscription, redis_client: aioredis.Redis = Depends(get_redis_client)):
+    try:
+        # Save subscription to Redis
+        await redis_client.hset(f"subscriptions:{subscription.user_id}", subscription.course_id, subscription.json())
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+    return {"message": "Subscribed successfully"}
+
+
+async def notify_enrollment(student_id: int, class_id: str):
+    try:
+        # this gets user's notification preferences from Redis
+        subscription_key = f"subscriptions:{student_id}"
+
+        subscriptions_data = await get_redisdb.hget(subscription_key, class_id)
+
+        if subscriptions_data:
+            subscription = Subscription.parse_raw(subscriptions_data.decode())
+            send_enrollment_notification(subscription)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 
 
 @student_router.post("/enrollment/", dependencies=[Depends(sync_user_account)], status_code=status.HTTP_201_CREATED)
@@ -176,7 +214,8 @@ def enroll(class_id: Annotated[str, Body(embed=True)],
             ]
 
             dynamodb.transact_write_items(TransactItems)
-
+            #calls the notify enrollment function 
+            notify_enrollment(student_id, class_id)
             response_json = JSONResponse(status_code=HTTPStatus.CREATED, content={
                                          "detail": "Enrolled successfully"})
 
@@ -245,6 +284,10 @@ def enroll(class_id: Annotated[str, Body(embed=True)],
         return response_json
     finally:
         redisdb.close()  # Close the Redis connection
+
+
+
+
 
 
 @student_router.delete("/enrollment/{class_id}", status_code=status.HTTP_200_OK)
@@ -361,3 +404,18 @@ def remove_from_waitlist(
         return response_json
     finally:
         redisdb.close()  # Close the Redis connection
+
+
+# student_router.py
+
+@student_router.post("/subscribe")
+async def subscribe_to_notifications(subscription: Subscription, redis_client: aioredis.Redis = Depends(get_redis_client)):
+    try:
+        # Save subscription to Redis
+        await redis_client.hset(f"subscriptions:{subscription.user_id}", subscription.course_id, subscription.json())
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+    return {"message": "Subscribed successfully"}
+
+
