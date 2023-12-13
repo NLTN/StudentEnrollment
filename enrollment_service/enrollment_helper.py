@@ -138,7 +138,8 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
                         student_id = int(student_id)
 
                         # send message to the fanout exchange
-                        message = f"Student {student_id} has been enrolled in class {class_id}"
+                        # placeholder until email has been implemented
+                        message = f"{event_type}#{class_id}#{student_id}"
                         channel.basic_publish(exchange="waitlist_exchange", routing_key='', body=message)
 
                     connection.close()
