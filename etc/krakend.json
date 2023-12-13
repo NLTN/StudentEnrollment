@@ -3,6 +3,106 @@
   "version": 3,
   "endpoints": [
     {
+      "_comment" : "[Notification Service] - subscribe",
+      "endpoint" : "/api/class/{class_id}/subscribe",
+      "input_headers": ["x-cwid", "x-first-name", "x-last-name"],
+      "method" : "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/class/{class_id}/subscribe",
+          "host" : ["http://localhost:5400"],
+          "extra_config": {
+            "backend/http": {
+              "return_error_code": true
+            }
+          }
+        }
+      ],
+      "extra_config": {
+        "auth/validator": {
+          "alg": "RS256",
+          "roles_key": "roles",
+          "roles": ["Student"],
+          "jwk_local_path": "./etc/public_key.json",
+          "disable_jwk_security": true,
+          "operation_debug": true,
+          "propagate_claims": [
+            ["jti", "x-cwid"],
+            ["first_name", "x-first-name"],
+            ["last_name", "x-last-name"]            
+          ]
+        }
+      }
+    },
+    {
+      "_comment" : "[Notification Service] - list subscription",
+      "endpoint" : "/api/subscriptions",
+      "input_headers": ["x-cwid", "x-first-name", "x-last-name"],
+      "method" : "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/subscriptions",
+          "host" : ["http://localhost:5400"],
+          "extra_config": {
+            "backend/http": {
+              "return_error_code": true
+            }
+          }
+        }
+      ],
+      "extra_config": {
+        "auth/validator": {
+          "alg": "RS256",
+          "roles_key": "roles",
+          "roles": ["Student"],
+          "jwk_local_path": "./etc/public_key.json",
+          "disable_jwk_security": true,
+          "operation_debug": true,
+          "propagate_claims": [
+            ["jti", "x-cwid"],
+            ["first_name", "x-first-name"],
+            ["last_name", "x-last-name"]            
+          ]
+        }
+      }
+    },
+    {
+      "_comment" : "[Notification Service] - unsubscribe",
+      "endpoint" : "/api/class/{class_id}/unsubscribe",
+      "input_headers": ["x-cwid", "x-first-name", "x-last-name"],
+      "method" : "DELETE",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "url_pattern": "/class/{class_id}/unsubscribe",
+          "host" : ["http://localhost:5400"],
+          "extra_config": {
+            "backend/http": {
+              "return_error_code": true
+            }
+          }
+        }
+      ],
+      "extra_config": {
+        "auth/validator": {
+          "alg": "RS256",
+          "roles_key": "roles",
+          "roles": ["Student"],
+          "jwk_local_path": "./etc/public_key.json",
+          "disable_jwk_security": true,
+          "operation_debug": true,
+          "propagate_claims": [
+            ["jti", "x-cwid"],
+            ["first_name", "x-first-name"],
+            ["last_name", "x-last-name"]            
+          ]
+        }
+      }
+    },
+    {
+      "_comment" : "[User Service] - Login",
       "endpoint": "/api/login/",
       "method": "POST",
       "backend": [
@@ -27,6 +127,7 @@
       }
     },
     {
+      "_comment" : "[User Service] - Register",
       "endpoint": "/api/register/",
       "method": "POST",
       "backend": [
