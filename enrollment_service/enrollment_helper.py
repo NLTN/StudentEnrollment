@@ -124,6 +124,25 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
                     # Update the counter
                     num_students_enrolled += num_open_seats
 
+                    # ***********************************************
+                    # RabbitMQ: Send a message to the fanout exchange
+                    # ***********************************************
+                    connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+                    channel = connection.channel()
+
+                     # Declare a fanout exchange
+                    channel.exchange_declare(exchange='waitlist_exchange', exchange_type='fanout')
+                    for m in members:
+                        student_id, first_name, last_name = m.decode('utf-8').split("#")
+                        student_id = int(student_id)
+
+                        # send message to the fanout exchange
+                        # placeholder until email has been implemented
+                        message = f"{event_type}#{class_id}#{student_id}"
+                        channel.basic_publish(exchange="waitlist_exchange", routing_key='', body=message)
+
+                    connection.close()
+
     except Exception as e:
         print(e)
     finally:
