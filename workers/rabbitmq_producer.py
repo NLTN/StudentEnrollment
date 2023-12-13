@@ -1,6 +1,7 @@
 from http.client import HTTPException
 import pika
 from enrollment_service.models import Subscription
+from fastapi import status
 
 # this file sends RabbitMQ notifications:
 
