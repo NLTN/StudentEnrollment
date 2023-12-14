@@ -15,4 +15,4 @@ webhook: uvicorn webhook.app:app --port 5500 --host 0.0.0.0 --reload
 webhook_dispatcher: python3 workers/webhook_dispatcher.py
 mail_dispatcher: python3 workers/mail_dispatcher.py
 
-notification_service: uvicorn notification_service.app:app --port 5400 --reload
+notification_service: uvicorn notification_service.app:app --port 5400 --host 0.0.0.0 --reload

@@ -165,7 +165,7 @@ class SubscribeTest(unittest.TestCase):
         response = requests.post(url, headers=headers, json=body)
 
         # ------------------------- Assert -------------------------
-        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.status_code, 400)
 
     def test_email_already_subscribed(self):
         # ------------------- Create sample data -------------------

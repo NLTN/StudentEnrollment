@@ -2,14 +2,16 @@ from fastapi import FastAPI, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from http import HTTPStatus
 from redis import Redis
-from pydantic import BaseModel
-from enrollment_service.db_connection import get_redisdb, get_dynamodb
+from pydantic import BaseModel, Field
+from typing import Optional
+import json
+from enrollment_service.db_connection import get_redisdb
 
 app = FastAPI()
 
 class SubscriptionPreference(BaseModel):
-    webhook_url: str
-    email: str
+    webhook_url: Optional[str] = Field(default=None, exclude=True)
+    email: Optional[str] = Field(default=None, exclude=True)
 
 
 @app.post("/class/{class_id}/subscribe")
@@ -22,6 +24,9 @@ def subscribe_notification_for_course(
     last_name: str = Header(alias="x-last-name"),
     ):
     
+    if not preference.webhook_url and not preference.email:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Please provide webhook_url and/or email to subscribe for notification")
+
     member_name = f'{student_id}#{first_name}#{last_name}'    
     is_student_waitlisted = redisdb.zrank(class_id, member_name) != None
     
@@ -31,7 +36,7 @@ def subscribe_notification_for_course(
     is_subscribed = redisdb.hget(member_name, class_id) != None
     if not is_subscribed:
         try:                        
-            if bool(redisdb.hset(member_name, class_id, f'{preference.webhook_url}#{preference.email}')):
+            if bool(redisdb.hset(member_name, class_id, json.dumps({"webhook_url": preference.webhook_url, "email": preference.email}))):
                 return JSONResponse(status_code=HTTPStatus.OK, content={"detail" : f'successfully subscribed to class with class id {class_id}'})
             
         except:            
@@ -52,9 +57,7 @@ def get_user_subscriptions(
     member_name = f'{student_id}#{first_name}#{last_name}'
     
     student_notification_subscriptions = [{
-        "class_id" : course.decode(),
-        "webhook_url" : value.decode().split('#')[0].strip(),
-        "email" : value.decode().split('#')[1].strip()
+        **json.loads(value), **{"class_id" : course.decode()}
     } for course, value in redisdb.hgetall(member_name).items()]
     
     return JSONResponse(status_code=HTTPStatus.OK, content={"notification subscription" : student_notification_subscriptions})
