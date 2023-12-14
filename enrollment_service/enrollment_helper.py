@@ -3,7 +3,7 @@ from fastapi import HTTPException, status
 from botocore.exceptions import ClientError
 from .dynamoclient import DynamoClient
 from .db_connection import get_dynamodb, get_redisdb, TableNames
-
+import pika
 
 def is_auto_enroll_enabled(dynamodb: DynamoClient):
     """
@@ -138,7 +138,7 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
 
                         # send message to the fanout exchange
                         # placeholder until email has been implemented
-                        message = f"{event_type}#{class_id}#{student_id}"
+                        message = f"AutoEnrolledFromWaitlist#{class_id}#{student_id}"
                         channel.basic_publish(exchange="waitlist_exchange", routing_key='', body=message)
 
                     connection.close()
