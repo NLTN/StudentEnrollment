@@ -146,7 +146,7 @@ def create_class(new_class: ClassCreate, dynamodb: DynamoClient = Depends(get_dy
         # Insert into DB
         # ---------------------------------------------------------------------
         # Generate class_id. Example format: 2024.Fall.CPSC.335.2
-        new_class.id = f"{new_class.year}.{new_class.semester}.{new_class.department_code}.{new_class.section_no}"
+        new_class.id = f"{new_class.year}.{new_class.semester}.{new_class.department_code}.{new_class.course_no}.{new_class.section_no}"
 
         # Convert to dictionary
         record = dict(new_class)
