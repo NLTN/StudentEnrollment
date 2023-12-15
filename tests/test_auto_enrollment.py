@@ -182,10 +182,14 @@ class AutoEnrollmentTest(unittest.TestCase):
             # Flag to indicate if a message was received
             self.message_received = True
 
-            data = json.loads(body)
-            if "email" in data:
-                nonlocal received_email
-                received_email = data["email"]
+            try:
+                data = json.loads(body)
+                if "email" in data:
+                    nonlocal received_email
+                    received_email = data["email"]
+            except json.decoder.JSONDecodeError as e:
+                print(f"JSON decoding error: {e}")
+            
             channel.stop_consuming()
 
             # Acknowledge the message to notify RabbitMQ that it has been processed
@@ -193,8 +197,9 @@ class AutoEnrollmentTest(unittest.TestCase):
 
         # RabbitMQ: Wait for the incoming message
         msg_received = self.receive_from_fanout_exchange("waitlist_exchange", "webhook", callback, 15)
+        
+        # ------------------------- Assert -------------------------
         self.assertTrue(msg_received)
-
         self.assertEqual(received_email, subscribed_email)
 
 if __name__ == '__main__':
