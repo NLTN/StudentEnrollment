@@ -3,6 +3,8 @@ from fastapi import HTTPException, status
 from botocore.exceptions import ClientError
 from .dynamoclient import DynamoClient
 from .db_connection import get_dynamodb, get_redisdb, TableNames
+import pika
+import json
 
 
 def is_auto_enroll_enabled(dynamodb: DynamoClient):
@@ -71,44 +73,43 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
                 transact_items = []
 
                 for m in members:
-                    student_id, first_name, last_name = m.decode(
-                        'utf-8').split("#")
+                    student_id, first_name, last_name = m.decode("utf-8").split("#")
                     student_id = int(student_id)
 
-                    transact_items.append({
-                        # ***********************************************
-                        # INSERT INTO enrollments table
-                        # ***********************************************
-                        "Put": {
-                            "TableName": TableNames.ENROLLMENTS,
-                            "Item": {
-                                "class_id": class_id,
-                                "student_cwid": student_id,
-                                "student_info": {
-                                    "first_name": first_name,
-                                    "last_name": last_name
-                                }
-                            },
-                            "ConditionExpression": "attribute_not_exists(class_id) AND attribute_not_exists(student_cwid)"
+                    transact_items.append(
+                        {
+                            # ***********************************************
+                            # INSERT INTO enrollments table
+                            # ***********************************************
+                            "Put": {
+                                "TableName": TableNames.ENROLLMENTS,
+                                "Item": {
+                                    "class_id": class_id,
+                                    "student_cwid": student_id,
+                                    "student_info": {
+                                        "first_name": first_name,
+                                        "last_name": last_name,
+                                    },
+                                },
+                                "ConditionExpression": "attribute_not_exists(class_id) AND attribute_not_exists(student_cwid)",
+                            }
                         }
-                    })
+                    )
 
-                    transact_items.append({
-                        # ***********************************************
-                        # UPDATE PERSONNEL `enrollments` & waitlists attributes
-                        # ***********************************************
-                        "Update": {
-                            "TableName": TableNames.PERSONNEL,
-                            "Key": {
-                                "cwid": student_id
-                            },
-                            "UpdateExpression": "ADD enrollments :value \
+                    transact_items.append(
+                        {
+                            # ***********************************************
+                            # UPDATE PERSONNEL `enrollments` & waitlists attributes
+                            # ***********************************************
+                            "Update": {
+                                "TableName": TableNames.PERSONNEL,
+                                "Key": {"cwid": student_id},
+                                "UpdateExpression": "ADD enrollments :value \
                                                  DELETE waitlists :value",
-                            "ExpressionAttributeValues": {
-                                ":value": {class_id}
-                            },
+                                "ExpressionAttributeValues": {":value": {class_id}},
+                            }
                         }
-                    })
+                    )
 
                 # ***********************************************
                 # Perform updating data in DynamoDB & Redis
@@ -123,6 +124,56 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
 
                     # Update the counter
                     num_students_enrolled += num_open_seats
+
+                    # ***********************************************
+                    # RabbitMQ: Send a message to the fanout exchange
+                    # ***********************************************
+                    # constructing a unique identifier for the student
+                    member_name = f"{student_id}#{first_name}#{last_name}"
+
+                    # retrieve the stored preferences for the student and class
+                    preferences_json = redisdb.hget(member_name, class_id)
+
+                    if preferences_json:
+                        # convert the preference exist for the student and class from redis
+                        preferences = json.loads(preferences_json)
+
+                        # extract email & webhook_url preferences
+                        email = preferences.get("email", "")
+                        webhook_url = preferences.get("webhook_url", "")
+
+                        # establish a connection
+                        connection = pika.BlockingConnection(
+                            pika.ConnectionParameters("localhost")
+                        )
+
+                        # create a channel
+                        channel = connection.channel()
+
+                        # declare the exchange
+                        exchange_name = "waitlist_exchange"
+                        channel.exchange_declare(
+                            exchange=exchange_name, exchange_type="fanout"
+                        )
+
+                        # constructing the message
+                        message = {
+                            "event_type": "AutoEnrolledFromWaitlist",
+                            "class_id": class_id,
+                            "email": email,
+                            "webhook_url": webhook_url,
+                        }
+
+                        # convert the message to JSON
+                        message = json.dumps(message)
+
+                        # publish the message to the exchange
+                        channel.basic_publish(
+                            exchange=exchange_name, routing_key="", body=message
+                        )
+
+                        # close the connection
+                        connection.close()
 
     except Exception as e:
         print(e)
@@ -159,7 +210,9 @@ def get_all_available_classes(dynamodb: DynamoClient):
         return responses["Items"]
 
 
-def add_to_waitlist(class_id, class_title: str, student_id, member_name: str, score: int):
+def add_to_waitlist(
+    class_id, class_title: str, student_id, member_name: str, score: int
+):
     try:
         redisdb = get_redisdb()
         dynamodb = get_dynamodb()
@@ -171,15 +224,11 @@ def add_to_waitlist(class_id, class_title: str, student_id, member_name: str, sc
         # UPDATE PERSONNEL `enrollments` attribute
         # ***********************************************
         update_kwargs = {
-            "Key": {
-                "cwid": student_id
-            },
+            "Key": {"cwid": student_id},
             "ConditionExpression": "attribute_exists(cwid)",
             "UpdateExpression": "ADD waitlists :value",
-            "ExpressionAttributeValues": {
-                ":value": {class_id}
-            },
-            "ReturnValues": "UPDATED_NEW"
+            "ExpressionAttributeValues": {":value": {class_id}},
+            "ReturnValues": "UPDATED_NEW",
         }
 
         dynamodb.update_item(TableNames.PERSONNEL, update_kwargs)
@@ -188,7 +237,9 @@ def add_to_waitlist(class_id, class_title: str, student_id, member_name: str, sc
         raise Exception(f"AddToWaitlistFailed: {e}")
 
 
-def drop_from_enrollment(class_id, student_id, administrative: bool, dynamodb: DynamoClient):
+def drop_from_enrollment(
+    class_id, student_id, administrative: bool, dynamodb: DynamoClient
+):
     try:
         # ***********************************************
         # Get student info
@@ -197,9 +248,10 @@ def drop_from_enrollment(class_id, student_id, administrative: bool, dynamodb: D
         response = dynamodb.get_item(TableNames.PERSONNEL, kwargs)
 
         if "Item" not in response:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                                    detail="Student Not Found")
-        
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Student Not Found"
+            )
+
         first_name = response["Item"]["first_name"]
         last_name = response["Item"]["last_name"]
 
@@ -211,11 +263,8 @@ def drop_from_enrollment(class_id, student_id, administrative: bool, dynamodb: D
                 # ***********************************************
                 "Delete": {
                     "TableName": TableNames.ENROLLMENTS,
-                    "Key": {
-                        "class_id": class_id,
-                        "student_cwid": student_id
-                    },
-                    "ConditionExpression": "attribute_exists(class_id) AND attribute_exists(student_cwid)"
+                    "Key": {"class_id": class_id, "student_cwid": student_id},
+                    "ConditionExpression": "attribute_exists(class_id) AND attribute_exists(student_cwid)",
                 }
             },
             {
@@ -229,10 +278,10 @@ def drop_from_enrollment(class_id, student_id, administrative: bool, dynamodb: D
                         "student_cwid": student_id,
                         "student_info": {
                             "first_name": first_name,
-                            "last_name": last_name
+                            "last_name": last_name,
                         },
-                        "administrative": administrative
-                    }
+                        "administrative": administrative,
+                    },
                 }
             },
             {
@@ -241,16 +290,14 @@ def drop_from_enrollment(class_id, student_id, administrative: bool, dynamodb: D
                 # ***********************************************
                 "Update": {
                     "TableName": TableNames.CLASSES,
-                    "Key": {
-                        "id": class_id
-                    },
+                    "Key": {"id": class_id},
                     "UpdateExpression": "SET available = :status, \
                                             enrollment_count = if_not_exists(enrollment_count, :zero) + :step_size",
                     "ExpressionAttributeValues": {
                         ":status": "true",
                         ":step_size": -1,
-                        ":zero": 0
-                    }
+                        ":zero": 0,
+                    },
                 }
             },
             {
@@ -259,15 +306,11 @@ def drop_from_enrollment(class_id, student_id, administrative: bool, dynamodb: D
                 # ***********************************************
                 "Update": {
                     "TableName": TableNames.PERSONNEL,
-                    "Key": {
-                        "cwid": student_id
-                    },
+                    "Key": {"cwid": student_id},
                     "UpdateExpression": "DELETE enrollments :value",
-                    "ExpressionAttributeValues": {
-                        ":value": {class_id}
-                    }
+                    "ExpressionAttributeValues": {":value": {class_id}},
                 }
-            }
+            },
         ]
 
         dynamodb.transact_write_items(TransactItems)
@@ -282,17 +325,18 @@ def drop_from_enrollment(class_id, student_id, administrative: bool, dynamodb: D
         if e.response["Error"]["Code"] == "TransactionCanceledException":
             cancellation_reasons = e.response["CancellationReasons"]
             if cancellation_reasons[0]["Code"] == "ConditionalCheckFailed":
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                                    detail="Transaction Canceled")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Transaction Canceled"
+                )
             else:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                                    detail="Conflict occurs")
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT, detail="Conflict occurs"
+                )
         else:
             raise Exception(e.response)
     except HTTPException as e:
         raise HTTPException(status_code=e.status_code, detail=str(e.detail))
     except Exception as e:
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                            detail=e)
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=e)
     else:
         return {"detail": "Item deleted successfully"}
