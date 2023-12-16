@@ -3,9 +3,11 @@ import requests
 from tests.helpers import *
 from tests.settings import BASE_URL
 from tests.db_connection import get_redisdb
+from tests.webhook_service import WebhookTestService
 import pika
 import time
 import json
+
 class AutoEnrollmentTest(unittest.TestCase):
     # Flag to indicate if a message was received
     message_received = False
@@ -151,7 +153,7 @@ class AutoEnrollmentTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
 
         # RabbitMQ: Purge the queue
-        self.purge_rabbitmq_queue("waitlist_exchange", "webhook")
+        self.purge_rabbitmq_queue("waitlist_exchange", "email")
 
         # BEFORE TEST: Get number of students on the waitlist before sending the request
         rdb = get_redisdb()
@@ -196,11 +198,90 @@ class AutoEnrollmentTest(unittest.TestCase):
             channel.basic_ack(delivery_tag=method.delivery_tag)
 
         # RabbitMQ: Wait for the incoming message
-        msg_received = self.receive_from_fanout_exchange("waitlist_exchange", "webhook", callback, 15)
+        msg_received = self.receive_from_fanout_exchange("waitlist_exchange", "email", callback, 15)
         
         # ------------------------- Assert -------------------------
         self.assertTrue(msg_received)
         self.assertEqual(received_email, subscribed_email)
+
+    def test_webhook_dispatcher(self):
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
+
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 1, users.registrar.access_token)
+        class_id = response.json()["inserted_id"]
+
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
+
+        # Student 2 enrolls
+        response = enroll_class(class_id, users.student2.access_token)
+
+        # Student 3 enrolls
+        user_register(900003, "abc9898@csu.fullerton.edu", "1234", "Tom",
+                        "Miller", ["Student"])
+        access_token = user_login("abc9898@csu.fullerton.edu", password="1234")
+        response = enroll_class(class_id, access_token)
+
+        # ---------- Student 2 subscribe for notifications ---------
+        subscribed_email = "abc2@csu.fullerton.edu"
+        subscribed_webhook_url = "http://localhost:5900/webhook"
+        headers = {
+            "Content-Type": "application/json;",
+            "Authorization": f"Bearer {users.student2.access_token}"
+        }
+        body = {
+            "email": subscribed_email,
+            "webhook_url": subscribed_webhook_url
+        }
+
+        # Send request
+        url = f'{BASE_URL}/api/class/{class_id}/subscribe'
+        response = requests.post(url, headers=headers, json=body)
+
+        # Start Webhook Test Service
+        webhook_service = WebhookTestService(port=5900)
+        webhook_service.start()
+
+        # BEFORE TEST: Get number of students on the waitlist before sending the request
+        rdb = get_redisdb()
+        count1 = rdb.zcard(class_id)
+
+        # ------------------ Student 1 drops class -----------------
+        headers = {
+            "Content-Type": "application/json;",
+            "Authorization": f"Bearer {users.student1.access_token}"
+        }
+
+        # Send request
+        url = f'{BASE_URL}/api/enrollment/{class_id}/'
+        response = requests.delete(url, headers=headers)
+
+
+        # AFTER TEST: Get number of students on the waitlist after sending the request
+        count2 = rdb.zcard(class_id)
+
+        # ------------------------- Assert -------------------------
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(count1, 2)
+        self.assertEqual(count2, 1)
+
+
+        # Get data from WebhookTestService
+        url = subscribed_webhook_url
+        response = requests.get(url)
+
+        # Shutdown Webhook Test Service
+        webhook_service.stop()
+
+        # ------------------------- Assert -------------------------
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+
+        
+
 
 if __name__ == '__main__':
     unittest.main()
