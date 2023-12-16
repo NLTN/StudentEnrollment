@@ -4,6 +4,7 @@ from botocore.exceptions import ClientError
 from .dynamoclient import DynamoClient
 from .db_connection import get_dynamodb, get_redisdb, TableNames
 import pika
+import json
 
 def is_auto_enroll_enabled(dynamodb: DynamoClient):
     """
@@ -138,7 +139,18 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
 
                         # send message to the fanout exchange
                         # placeholder until email has been implemented
-                        message = f"AutoEnrolledFromWaitlist#{class_id}#{student_id}"
+
+                        message = {
+                                    "event_type": "AutoEnrolledFromWaitlist", 
+                                    "class_id": class_id,
+                                    "email": "abc2@csu.fullerton.edu", # TODO: Get data from Redis
+                                    "webhook_url": "http://localhost:5900/webhook" # TODO: Get data from Redis
+                                }
+
+                        # Convert the JSON message to a string
+                        message = json.dumps(message)
+
+                        # Send message to the fanout exchange
                         channel.basic_publish(exchange="waitlist_exchange", routing_key='', body=message)
 
                     connection.close()
