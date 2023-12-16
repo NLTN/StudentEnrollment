@@ -1,26 +1,45 @@
 import pika
-import logging
+import requests
 from helper import wait_for_service
 
-# Logger
-logging.basicConfig(filename=f'webhook_dispatcher.log', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+def post_data():
+    try:
+        # ---------- Student 2 subscribe for notifications ---------
+        headers = {
+            "Content-Type": "application/json;"
+        }
+        body = {"key1": "value1", "key2":"value2"}
 
+        # Send request
+        url = f'http://localhost:5900/webhook'
+        response = requests.post(url, headers=headers, json=body)
+    except Exception as e:
+        print(e)
 
 def dispatcher():
     connection = pika.BlockingConnection(
         pika.ConnectionParameters('localhost'))
     channel = connection.channel()
-    channel.queue_declare(queue='hello')
 
     def callback(ch, method, properties, body):
         msg = f" [x] Received {body}"
         print(msg)
-        logging.info(msg)
+        post_data()
 
-    channel.basic_consume(queue='hello',
-                          auto_ack=True,
-                          on_message_callback=callback)
+    exchange_name = "waitlist_exchange"
+    queue_name = "webhook"
+    
+    # Declare a fanout exchange
+    channel.exchange_declare(exchange=exchange_name, exchange_type='fanout')
 
+    # Declare a queue and bind it to the fanout exchange
+    channel.queue_declare(queue=queue_name)
+    channel.queue_bind(exchange=exchange_name, queue=queue_name)
+
+    # Set up the callback function for handling incoming messages
+    channel.basic_consume(
+        queue=queue_name, on_message_callback=callback, auto_ack=False)
+    
     print(' [*] Waiting for messages. To exit press CTRL+C')
 
     channel.start_consuming()
