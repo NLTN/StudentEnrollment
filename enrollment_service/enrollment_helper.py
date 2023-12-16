@@ -177,6 +177,7 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
 
     except Exception as e:
         print(e)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=e)
     finally:
         redisdb.close()  # Close the Redis connection
 
