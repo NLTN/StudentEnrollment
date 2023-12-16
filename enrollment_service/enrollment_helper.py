@@ -139,8 +139,8 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
                         preferences = json.loads(preferences_json)
 
                         # extract email & webhook_url preferences
-                        email = preferences.get("email", "")
-                        webhook_url = preferences.get("webhook_url", "")
+                        email = preferences.get("email")
+                        webhook_url = preferences.get("webhook_url")
 
                         # establish a connection
                         connection = pika.BlockingConnection(
