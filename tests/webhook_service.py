@@ -2,6 +2,27 @@ import time
 import threading
 from fastapi import FastAPI
 
+import os
+import subprocess
+
+def get_pid_by_port(port):
+    try:
+        result = subprocess.check_output(["lsof", "-t", f"-i:{port}"])
+        return int(result.decode("utf-8").strip())
+    except subprocess.CalledProcessError:
+        return None
+
+def kill_process_by_port(port):
+    pid = get_pid_by_port(port)
+    if pid:
+        try:
+            os.kill(pid, 9)  # SIGKILL
+            print(f"Process with PID {pid} killed successfully.")
+        except ProcessLookupError:
+            print(f"Process with PID {pid} not found.")
+    else:
+        print(f"No process found on port {port}.")
+
 
 class ServiceManager:
     def __init__(self, port=8000 , shutdown_timer=30):
@@ -11,6 +32,7 @@ class ServiceManager:
         self.shutdown_timer = threading.Timer(shutdown_timer, self.shutdown)
 
     def start(self):
+        kill_process_by_port(self.port)
         self.shutdown_timer.start()
         threading.Thread(target=self._run, daemon=True).start()
 
