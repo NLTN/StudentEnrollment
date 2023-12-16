@@ -128,56 +128,63 @@ def enroll_students_from_waitlist(class_id_list: list, dynamodb: DynamoClient):
                     # ***********************************************
                     # RabbitMQ: Send a message to the fanout exchange
                     # ***********************************************
-                    # constructing a unique identifier for the student
-                    member_name = f"{student_id}#{first_name}#{last_name}"
+                    # establish a connection
+                    connection = pika.BlockingConnection(
+                        pika.ConnectionParameters("localhost")
+                    )
 
-                    # retrieve the stored preferences for the student and class
-                    preferences_json = redisdb.hget(member_name, class_id)
+                    # create a channel
+                    channel = connection.channel()
 
-                    if preferences_json:
-                        # convert the preference exist for the student and class from redis
-                        preferences = json.loads(preferences_json)
+                    # declare the fanout exchange
+                    exchange_name = "waitlist_exchange"
+                    channel.exchange_declare(
+                        exchange=exchange_name, exchange_type="fanout"
+                    )
 
-                        # extract email & webhook_url preferences
-                        email = preferences.get("email")
-                        webhook_url = preferences.get("webhook_url")
+                    for m in members:
+                        student_id, first_name, last_name = m.decode("utf-8").split("#")
+                        student_id = int(student_id)
 
-                        # establish a connection
-                        connection = pika.BlockingConnection(
-                            pika.ConnectionParameters("localhost")
-                        )
+                        # constructing a unique identifier for the student
+                        member_name = f"{student_id}#{first_name}#{last_name}"
 
-                        # create a channel
-                        channel = connection.channel()
+                        # retrieve the stored preferences for the student and class
+                        preferences_json = redisdb.hget(member_name, class_id)
 
-                        # declare the exchange
-                        exchange_name = "waitlist_exchange"
-                        channel.exchange_declare(
-                            exchange=exchange_name, exchange_type="fanout"
-                        )
+                        if preferences_json:
+                            # convert the preference exist for the student and class from redis
+                            preferences = json.loads(preferences_json)
 
-                        # constructing the message
-                        message = {
-                            "event_type": "AutoEnrolledFromWaitlist",
-                            "class_id": class_id,
-                            "email": email,
-                            "webhook_url": webhook_url,
-                        }
+                            # constructing the message
+                            message = {
+                                "event_type": "AutoEnrolledFromWaitlist",
+                                "class_id": class_id,
+                            }
 
-                        # convert the message to JSON
-                        message = json.dumps(message)
+                            # extract email
+                            email = preferences.get("email")
+                            if email:
+                                message["email"] = email
 
-                        # publish the message to the exchange
-                        channel.basic_publish(
-                            exchange=exchange_name, routing_key="", body=message
-                        )
+                            # extract webhook_url
+                            webhook_url = preferences.get("webhook_url")
+                            if webhook_url:
+                                message["webhook_url"] = webhook_url
 
-                        # close the connection
-                        connection.close()
+                            # convert JSON message to a string
+                            message = json.dumps(message)
+
+                            # publish the message to the exchange
+                            channel.basic_publish(
+                                exchange=exchange_name, routing_key="", body=message
+                            )
+
+                    # close the connection
+                    connection.close()
 
     except Exception as e:
         print(e)
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=e)
     finally:
         redisdb.close()  # Close the Redis connection
 
