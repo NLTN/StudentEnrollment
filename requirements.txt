@@ -7,3 +7,4 @@ requests
 boto3
 redis
 pika #RabbitMQ client library
+aiosmtpd # SMTP server

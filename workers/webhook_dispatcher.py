@@ -1,34 +1,53 @@
 import pika
 import requests
+import logging
+import json
 from helper import wait_for_service
 
-def post_data():
-    try:
-        # ---------- Student 2 subscribe for notifications ---------
-        headers = {
-            "Content-Type": "application/json;"
-        }
-        body = {"key1": "value1", "key2":"value2"}
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-        # Send request
-        url = f'http://localhost:5900/webhook'
-        response = requests.post(url, headers=headers, json=body)
-    except Exception as e:
-        print(e)
+pika_logger = logging.getLogger('pika')
+pika_logger.setLevel(logging.WARNING)
 
+def callback(ch, method, properties, body):
+    # Log the received message
+    # logger.info(body)
+    
+    # Load the binary body into a Python object
+    data = json.loads(body.decode('utf-8'))
+    webhook_url = data.get("webhook_url")
+
+    if webhook_url:
+        # Optional. Add an message
+        data["message"] = "You have been successfully enrolled from the waitlist."
+        
+        try:
+            headers = {
+                "Content-Type": "application/json;"
+            }
+            
+            # Send request
+            response = requests.post(webhook_url, headers=headers, json=data)
+
+            # Check the HTTP response status code
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            # Handle exceptions raised by the HTTP request
+            logger.error(f"Failed to send POST request: {e}")
+        else:
+             # POST request is successful. Acknowledge the message!
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            
 def dispatcher():
     connection = pika.BlockingConnection(
         pika.ConnectionParameters('localhost'))
     channel = connection.channel()
 
-    def callback(ch, method, properties, body):
-        msg = f" [x] Received {body}"
-        print(msg)
-        post_data()
-
     exchange_name = "waitlist_exchange"
     queue_name = "webhook"
-    
+
     # Declare a fanout exchange
     channel.exchange_declare(exchange=exchange_name, exchange_type='fanout')
 
@@ -39,11 +58,12 @@ def dispatcher():
     # Set up the callback function for handling incoming messages
     channel.basic_consume(
         queue=queue_name, on_message_callback=callback, auto_ack=False)
-    
-    print(' [*] Waiting for messages. To exit press CTRL+C')
 
-    channel.start_consuming()
-
+    try:
+        channel.start_consuming()
+    except KeyboardInterrupt:
+        logger.info("Received interrupt, stopping consumption.")
+        connection.close()
 
 if __name__ == '__main__':
     try:
@@ -51,8 +71,8 @@ if __name__ == '__main__':
 
         if not is_rabbitmq_running:
             raise Exception("RabbitMQ Not Running")
-        
+
         # Start dispatcher
         dispatcher()
     except Exception as e:
-        print('Interrupted', e)
+        logger.error('Error during execution', exc_info=True)

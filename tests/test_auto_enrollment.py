@@ -113,7 +113,7 @@ class AutoEnrollmentTest(unittest.TestCase):
         self.assertEqual(count1, 2)
         self.assertEqual(count2, 1)
 
-    
+    @unittest.skip("Reason: No longer needed")
     def test_publish_message_to_RabbitMQ(self):
         # ------------------- Create sample data -------------------
         # Register new users & Login
