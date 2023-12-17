@@ -445,7 +445,7 @@
       "_comment": "Student 4: View current waitlist position",
       "endpoint": "/api/waitlist/{class_id}/position/",
       "method": "GET",
-      "input_headers": ["x-cwid", "x-first-name", "x-last-name", "x-roles"],
+      "input_headers": ["x-cwid", "x-first-name", "x-last-name", "x-roles", "If-None-Match"],
       "output_encoding": "no-op",
       "backend": [
         {
