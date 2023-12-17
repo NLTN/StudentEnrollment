@@ -30,7 +30,7 @@ python3 -m unittest -v
 ```
 
 ## Microservice Diagram
-<img src="https://github.com/NLTN/Assets/blob/main/StudentEnrollment/APIGatewayV2.png?raw=true">
+<img src="https://github.com/NLTN/Assets/blob/main/StudentEnrollment/HighLevelDiagramV3.png?raw=true">
 
 ## Database Diagram
 
@@ -73,3 +73,10 @@ python3 -m unittest -v
 |GET     | /api/classes/{class_id}/droplist/    | Retreive students who have dropped the class  |
 |GET     | /api/classes/{class_id}/waitlist/    | Retreive students in the waiting list        |
 |DELETE  | /api/enrollment/{class_id}/{student_id}/administratively/   | Instructors drop students administratively. |
+
+#### Notification Subscription Service
+| Method | Route                                | Description                               |
+|--------|--------------------------------------|-------------------------------------------|
+|GET     | /api/subscriptions                   | List subscriptions. |
+|POST    | /api/class/{class_id}/subscribe      | Subscribe to notifications for a new course.  |
+|POST    | /api/class/{class_id}/unsubscribe    | Unsubscribe from a course. |
