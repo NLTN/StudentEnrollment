@@ -244,6 +244,7 @@ class AutoEnrollmentTest(unittest.TestCase):
         # Start Webhook Test Service
         webhook_service = WebhookTestService(port=5900)
         webhook_service.start()
+        time.sleep(5) # Wait a few seconds to make sure the service is up and running
 
         # BEFORE TEST: Get number of students on the waitlist before sending the request
         rdb = get_redisdb()
