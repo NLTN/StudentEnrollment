@@ -272,12 +272,16 @@ def drop_class(
 
 @student_router.get("/waitlist/{class_id}/position/")
 def get_current_waitlist_position(
-        class_id: str,
-        student_id: int = Header(
-            alias="x-cwid", description="A unique ID for students, instructors, and registrars"),
-        first_name: str = Header(alias="x-first-name"),
-        last_name: str = Header(alias="x-last-name"),
-        redisdb: Redis = Depends(get_redisdb)):
+    class_id: str,
+    student_id: int = Header(
+        alias="x-cwid",
+        description="A unique ID for students, instructors, and registrars",
+    ),
+    first_name: str = Header(alias="x-first-name"),
+    last_name: str = Header(alias="x-last-name"),
+    # is used to indicate the timestamp if it has been modified
+    if_modified_since: str = Header(None, alias="If-Modified-Since"),
+    redisdb: Redis = Depends(get_redisdb),):
     """
     Retreive the position of the student on the waitlist.
 
@@ -288,24 +292,38 @@ def get_current_waitlist_position(
     - HTTPException (404): If record not found
     """
     try:
-        # Get the rank of the member in the sorted set
+        # Getting the position of the member in the sorted set
         member = f"{student_id}#{first_name}#{last_name}"
-        rank = redisdb.zrank(class_id, member)
+        position = redisdb.zrank(class_id, member) + 1
 
-        if rank is not None:
-            response_json = {"position": rank + 1}
+        if position is not None:
+            # generate Last-Modified timestamp
+            last_modified_timestamp = datetime.utcnow()
+            # format Last-Modified timestamp
+            last_modified_header = last_modified_timestamp.strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+            # checks if timestamp was modified
+            if if_modified_since:
+                # Parse the If-Modified-Since header
+                if_modified_since_time = datetime.strptime(if_modified_since, "%a, %d %b %Y %H:%M:%S GMT")
+                
+                if last_modified_timestamp <= if_modified_since_time:
+                    # The resource has not been modified since the specified time
+                    raise HTTPException(status_code=HTTPStatus.NOT_MODIFIED)
+
+            response_json = {"position": position}
         else:
-            raise HTTPException(status_code=HTTPStatus.NOT_FOUND,
-                                detail="Record Not Found")
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Record Not Found")
     except RedisError as e:
         print(f"RedisError: {e}")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
     else:
-        return response_json
+        response = JSONResponse(content=response_json)
+        response.headers["Last-Modified"] = last_modified_header
+        return response
     finally:
         redisdb.close()  # Close the Redis connection
-
 
 @student_router.delete("/waitlist/{class_id}/", status_code=status.HTTP_200_OK)
 def remove_from_waitlist(
