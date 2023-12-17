@@ -279,9 +279,8 @@ def get_current_waitlist_position(
     ),
     first_name: str = Header(alias="x-first-name"),
     last_name: str = Header(alias="x-last-name"),
-    # is used to indicate the timestamp if it has been modified
-    if_modified_since: str = Header(None, alias="If-Modified-Since"),
-    redisdb: Redis = Depends(get_redisdb),):
+    if_none_match: str = Header(None, alias="If-None-Match"),
+    redisdb: Redis = Depends(get_redisdb)):
     """
     Retreive the position of the student on the waitlist.
 
@@ -294,33 +293,36 @@ def get_current_waitlist_position(
     try:
         # Getting the position of the member in the sorted set
         member = f"{student_id}#{first_name}#{last_name}"
-        position = redisdb.zrank(class_id, member) + 1
+        position = redisdb.zrank(class_id, member)
 
-        if position is not None:
-            # generate Last-Modified timestamp
-            last_modified_timestamp = datetime.utcnow()
-            # format Last-Modified timestamp
-            last_modified_header = last_modified_timestamp.strftime("%a, %d %b %Y %H:%M:%S GMT")
-
-            # checks if timestamp was modified
-            if if_modified_since:
-                # Parse the If-Modified-Since header
-                if_modified_since_time = datetime.strptime(if_modified_since, "%a, %d %b %Y %H:%M:%S GMT")
-                
-                if last_modified_timestamp <= if_modified_since_time:
-                    # The resource has not been modified since the specified time
-                    raise HTTPException(status_code=HTTPStatus.NOT_MODIFIED)
-
-            response_json = {"position": position}
-        else:
+        # If Record Not Found, raise an exception
+        if position is None:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Record Not Found")
+        
+        # Normalize the position to make sense for humans
+        position += 1
+        
+        # ETags is used to indicate if the student's postion on waitlist has changed
+        etag = position
+
+        # Check If-None-Match
+        if if_none_match and int(if_none_match) == etag:
+            # The resource has not been modified since the specified position
+            raise HTTPException(status_code=HTTPStatus.NOT_MODIFIED, detail="Not Modified")
+
+        response_json = {"position": position}
     except RedisError as e:
         print(f"RedisError: {e}")
+    except ValueError as e: 
+        # Handle the conversion string to int fails
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Cannot convert Etag to an integer: {e}")
+    except HTTPException as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e.detail))
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
     else:
         response = JSONResponse(content=response_json)
-        response.headers["Last-Modified"] = last_modified_header
+        response.headers["ETag"] = str(etag) # Set the ETag in the response headers
         return response
     finally:
         redisdb.close()  # Close the Redis connection

@@ -218,6 +218,62 @@ class WaitlistTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["position"], 1)
 
+    def test_cache_waitlist_position(self):
+        # ------------------- Create sample data -------------------
+        # Register new users & Login
+        users = create_sample_users()
+
+        # Create a class
+        response = create_class("SOC", 301, 2, 2024, "FA", 1, 1, users.registrar.access_token)
+        class_id = response.json()["inserted_id"]
+
+        # Student 1 enrolls
+        response = enroll_class(class_id, users.student1.access_token)
+
+        # Student 2 enrolls
+        response = enroll_class(class_id, users.student2.access_token)
+
+        # -------------------- Make API request --------------------
+        headers = {
+            "Content-Type": "application/json;",
+            "Authorization": f"Bearer {users.student2.access_token}"
+        }
+
+        # Send request
+        url = f'{BASE_URL}/api/waitlist/{class_id}/position/'
+        response = requests.get(url, headers=headers)
+
+        # Get Etag
+        etag = response.headers["etag"]
+        
+        # ------------------------- Assert -------------------------
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["position"], 1)
+
+        try:
+            # Attempt to convert the string to an integer
+            etag = int(etag)
+        except ValueError:
+            # Raise an AssertionError if a ValueError occurs
+            self.fail(f"Conversion of '{etag}' to int failed unexpectedly")
+
+        self.assertEqual(etag, 1)
+
+        # ------- Make API request with If-None-Match header -------
+        headers = {
+            "Content-Type": "application/json;",
+            "Authorization": f"Bearer {users.student2.access_token}",
+            "If-None-Match": str(etag)
+        }
+
+        # Send request
+        url = f'{BASE_URL}/api/waitlist/{class_id}/position/'
+        response = requests.get(url, headers=headers)
+
+        # ------------------------- Assert -------------------------
+        self.assertEqual(response.status_code, 304)
+
+
     def test_remove_from_waitlist(self):
         # ------------------- Create sample data -------------------
         # Register new users & Login
