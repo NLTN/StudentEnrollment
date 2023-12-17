@@ -56,7 +56,7 @@ class WebhookTestService:
         self.incoming_data = list()
         
         # Create a service manager
-        self.manager = ServiceManager(port=port, shutdown_timer=20)
+        self.manager = ServiceManager(port=port, shutdown_timer=30)
 
         # FastAPI routes
         @self.manager.app.post("/webhook")
